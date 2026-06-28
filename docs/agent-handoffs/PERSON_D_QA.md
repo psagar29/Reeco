@@ -20,7 +20,7 @@ No Swift, backend logic, CV model, or generated files were modified.
 
 **New docs**
 - `docs/DEMO_RUNBOOK.md` — demo-day runbook (objective, hardware, accounts, env
-  vars, happy-path setup, 2-min script, recovery plan).
+  vars, happy-path setup, and live demo script).
 - `docs/INTEGRATION_CHECKLIST.md` — merge order, per-branch pre-merge checks,
   conflict hotspots, contract checks, post-merge end-to-end checks.
 - `docs/QA_CHECKLIST.md` — backend / CV / iOS / product checks with **evidence**

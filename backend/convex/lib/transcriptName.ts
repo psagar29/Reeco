@@ -2,7 +2,7 @@
  * Extract an explicit spoken/typed person name from identity commands.
  *
  * Examples:
- *   "find info on Saahith Veeramaneni" -> "Saahith Veeramaneni"
+ *   "find info on Jordan Lee"          -> "Jordan Lee"
  *   "get linkedin for Zhi Hao"         -> "Zhi Hao"
  *   "find info on him"                 -> null
  */

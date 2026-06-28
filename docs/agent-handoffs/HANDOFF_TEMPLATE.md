@@ -28,7 +28,7 @@ left for a follow-up.>
 
 ```bash
 # example
-cd backend && npm run verify     # typecheck 0, 49 tests pass, smoke exit 0
+cd backend && npm run typecheck && npm test     # typecheck 0, full test suite passes
 ```
 
 | Command | Result |

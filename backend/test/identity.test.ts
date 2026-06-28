@@ -262,14 +262,14 @@ describe("findCandidates", () => {
 
 describe("extractSpokenIdentityName", () => {
   it("extracts an explicit name from identity commands", () => {
-    expect(extractSpokenIdentityName("find info on Saahith Veeramaneni")).toBe(
-      "Saahith Veeramaneni",
+    expect(extractSpokenIdentityName("find info on Jordan Lee")).toBe(
+      "Jordan Lee",
     );
     expect(extractSpokenIdentityName("get linkedin for Zhi Hao")).toBe(
       "Zhi Hao",
     );
-    expect(extractSpokenIdentityName("look up Dat Nguyen linkedin")).toBe(
-      "Dat Nguyen",
+    expect(extractSpokenIdentityName("look up Morgan Chen linkedin")).toBe(
+      "Morgan Chen",
     );
   });
 
@@ -284,9 +284,9 @@ describe("extractLinkedInProfileUrl", () => {
   it("extracts and normalizes LinkedIn profile URLs", () => {
     expect(
       extractLinkedInProfileUrl(
-        "find info on linkedin.com/in/saahith-veeramaneni-960942272",
+        "find info on linkedin.com/in/jordan-lee-demo",
       ),
-    ).toBe("https://www.linkedin.com/in/saahith-veeramaneni-960942272");
+    ).toBe("https://www.linkedin.com/in/jordan-lee-demo");
     expect(
       extractLinkedInProfileUrl(
         "https://www.linkedin.com/in/dat888/",

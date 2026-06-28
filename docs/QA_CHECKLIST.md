@@ -1,154 +1,170 @@
-# Recco — QA Checklist
+# Recco QA Checklist
 
-Per-component verification before a merge or a demo. Boxes are the checks; the
-**Last verified** notes record what Person D actually ran on this branch
-(Windows, no Xcode), with evidence — claims here are not aspirational.
+Use this before a demo, merge, or handoff. A box is only checked when the command
+or device behavior has actually been verified.
 
-- **Companion docs:** [INTEGRATION_CHECKLIST](INTEGRATION_CHECKLIST.md) ·
-  [DEMO_RUNBOOK](DEMO_RUNBOOK.md)
-- **Convention:** *evidence before claims.* If a command wasn't run in this
-  environment, it's marked **owner-verified** (whoever has the right machine).
+Related docs: [Demo Runbook](DEMO_RUNBOOK.md) · [Architecture](ARCHITECTURE.md) ·
+[API Contracts](API_CONTRACTS.md)
 
 ---
 
-## Backend (`backend/`, Convex + TypeScript)
+## Backend
 
 ```bash
 cd backend
 npm ci
-npm run typecheck      # tsc --noEmit
-npm run test           # vitest (49 cases)
-npm run smoke          # exercises every function's logic, prints JSON
-npm run verify         # all three above
-npm audit              # advisory; see note
+npm run typecheck
+npm test
 ```
 
-- [x] `npm ci` installs cleanly.
-- [x] `npm run typecheck` → 0 errors.
-- [x] `npm run test` → all tests pass.
-- [x] `npm run smoke` → exits 0, prints contract-shaped JSON for every function.
-- [x] `npm audit` reviewed (status below).
+- [x] Dependencies install.
+- [x] TypeScript typecheck passes.
+- [x] Vitest passes.
+- [x] No backend secrets are committed.
 
-**Last verified (Person D, this branch):** `npm ci` ok · typecheck **exit 0** ·
-tests **49/49 passed** (`filter` 11, `opener` 7, `similarity` 17, `voice` 14) ·
-smoke **exit 0**.
+Current verified result:
 
-> **`npm audit` known status:** reports **5 vulnerabilities (3 moderate, 1 high,
-> 1 critical)**, all in the **dev-only** transitive chain of `vitest`
-> (`vite` / `vite-node` / `esbuild`). These are **test tooling**, not shipped to
-> the Convex deployment or the app. **Do not run `npm audit fix --force`** — it
-> would force a breaking major bump of the test runner. Accepted for the demo;
-> revisit by upgrading `vitest` to a patched major during normal maintenance.
+```txt
+9 test files passed
+167 tests passed
+```
 
-> **`npm ci` note:** npm 11 prints `allow-scripts` advisories for esbuild's
-> postinstall. They are informational; tests/smoke run, so esbuild is functional.
-
----
-
-## CV service (`cv-service/`, FastAPI + InsightFace)
+Focused live checks:
 
 ```bash
-# Syntax check (works on any Python, no heavy deps):
-python -m py_compile cv-service/main.py cv-service/test_embed.py
-
-# Full run (needs Python 3.10–3.11 for InsightFace wheels):
-cd cv-service && python -m venv .venv
-. .venv/Scripts/Activate.ps1            # PowerShell  (mac/Linux: source .venv/bin/activate)
-pip install -r requirements.txt
-uvicorn main:app --port 8000
+curl https://fabulous-hyena-861.convex.site/api/health
+curl https://fabulous-hyena-861.convex.site/api/people
 ```
 
-- [x] `py_compile` of `main.py` + `test_embed.py` → exit 0 (syntax OK).
-- [ ] `GET /health` → `{"ok":true,"model":"buffalo_s","ready":true}` — **owner-verified** (needs deps).
-- [ ] `POST /embed` with a real face → `faceDetected:true`, 512 finite floats, ‖v‖ ≈ 1.0 — **owner-verified**.
-- [ ] No-face path: `python test_embed.py` (no image) → clean `faceDetected:false`, `embedding:null`, no crash — **owner-verified**.
+- [x] `/api/health` returns JSON with `ok: true`.
+- [x] `/api/people` returns public people only, never `faceEmbedding`.
+- [ ] `/api/voice/deepgram-token` returns a usable token with `DEEPGRAM_API_KEY`.
+- [ ] `/api/identity/resolve` returns a candidate for a real badge/name photo.
+- [ ] `/api/brain/memories` returns saved scan memories for the active client.
+- [ ] `/api/gtm/run` creates a GTM run and prospects.
 
-**Last verified (Person D, this branch):** `py_compile` **exit 0** for both files.
-
-> **Python version caveat:** `py_compile` passes on any modern Python, but
-> InsightFace + onnxruntime wheels target **Python 3.10–3.11**. Install/run on a
-> 3.10/3.11 venv; newer Pythons (e.g. 3.12+/3.14) may lack prebuilt wheels.
-
----
-
-## iOS app (`app/ios/Recco/`, SwiftUI) — **owner-verified (Person A, needs Xcode)**
-
-> Agents have no Xcode/iOS SDK and **cannot build or run the app.** These are
-> Person A's checks on a Mac with full Xcode.
+## CV Service
 
 ```bash
-# Build for an iPhone simulator (must succeed):
-xcodebuild -project app/ios/Recco/Recco.xcodeproj -scheme Recco \
-  -destination 'platform=iOS Simulator,name=iPhone 17' build
-
-# Device-compile (code-signing-only failure without a profile is acceptable):
-xcodebuild -project app/ios/Recco/Recco.xcodeproj -scheme Recco \
-  -destination 'generic/platform=iOS' build
+curl http://<cv-host>:8000/health
 ```
 
-- [ ] Simulator build succeeds (no compile errors).
-- [ ] Simulator run in **`mockAll`**: app opens to camera hero; synthetic faces
-      produce overlay cards; chips/typed commands dim non-matches; tap → profile;
-      "Scan" works; (DEBUG) self-check prints `19/19 passed`.
-- [ ] Physical iPhone: real camera tracks 2–3 faces without wild flicker; front/back
-      flip keeps boxes aligned; `live`/`mockCV` (with backend up) returns matches.
+- [ ] Health returns `{ ok: true, ready: true }`.
+- [ ] Model name matches the enrolled embeddings model.
+- [ ] `POST /embed` on a face returns `faceDetected: true`.
+- [ ] Embedding length is 512.
+- [ ] Embedding values are finite and approximately L2-normalized.
+- [ ] No-face images return `faceDetected: false` and `embedding: null`.
 
-> Per `docs/planning/PROGRESS_LOG.md`, the camera lane's **pure logic** (19/19)
-> and **non-UI type-check** were verified with the Swift compiler, but the full
-> `xcodebuild`/Simulator run was **not** done in an agent environment.
+## iOS Build And Install
 
----
-
-## Product behavior (acceptance)
-
-End-user behavior, observed on device/simulator (Person A) or approximated via
-backend calls (agents). Mirrors `docs/API_CONTRACTS.md` → "Acceptance tests".
-
-- [ ] **Recognized person shows overlay** — enrolled face → card with name + role.
-- [ ] **LinkedIn/profile visible** — profile sheet shows links; tap opens LinkedIn.
-- [ ] **Unknown does not show a wrong overlay** — below-threshold face → no named card.
-      *Agent-verifiable proxy:* unrelated image → `vision:matchFace` returns
-      `status:"unknown"`, `personId:null`.
-- [ ] **Filters dim/brighten correctly** — "show me AI founders" / chips update
-      visible/dimmed in camera + Brain graph.
-      *Agent-verifiable proxy:* `npx convex run state:setFilter '{"command":{"action":"filter","includeTags":["AI"],"excludeTags":[]}}'`
-      → visible `[ava, nina, omar]`, dimmed `[miles, sam]`.
-- [ ] **Draft opener works** — selecting a person yields a short, specific opener.
-      *Agent-verifiable proxy:* `npx convex run drafts:createOpener '{"personId":"person_ava_shah"}'`.
-
-> **Windows:** run `npx convex run ...` commands that take JSON args from **Git
-> Bash** (PowerShell 5.1 mangles embedded quotes).
-
----
-
-## Docs / repo hygiene (Person D)
+Build:
 
 ```bash
-python scripts/check_markdown_links.py        # relative-link checker (stdlib only)
+xcodebuild \
+  -project app/ios/Recco/Recco.xcodeproj \
+  -scheme Recco \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath build/DerivedData-demo \
+  build
 ```
 
-- [x] `check_markdown_links.py` → **OK** (all relative Markdown links resolve).
-- [x] Stale `docs/workstreams` / `docs/OPEN_SOURCE_REPOS` references repointed to `docs/planning/...`.
-- [x] No secrets in tracked files; `.env.local` git-ignored.
+Install:
 
-**Last verified (Person D, this branch):** link checker scanned **16** Markdown
-files → **OK, exit 0**.
+```bash
+xcrun devicectl list devices
+xcrun devicectl device uninstall app --device <DEVICE_ID> com.recco.app || true
+xcrun devicectl device install app --device <DEVICE_ID> build/DerivedData-demo/Build/Products/Debug-iphoneos/Recco.app
+xcrun devicectl device process launch --device <DEVICE_ID> --terminate-existing com.recco.app
+```
 
-> **About the link checker:** `scripts/check_markdown_links.py` is **standard
-> library only**, **ignores external URLs** and in-page `#anchors`, **skips
-> fenced and inline code**, and flags any relative link whose target file is
-> missing. It is **advisory** (run it before a docs PR); it is intentionally
-> **not** a required CI gate yet. It does not validate bare inline-code paths
-> (prose like `` `docs/foo.md` ``) or `#anchor` fragments.
+- [ ] Generic iOS build succeeds.
+- [ ] Device appears as `available`.
+- [ ] App installs on device.
+- [ ] App launches from Xcode/devicectl.
+- [ ] App launches from iPhone home screen after cable disconnect.
+- [ ] Camera permission is granted.
+- [ ] Microphone permission is granted.
 
----
+## Camera And AR UI
 
-## Quick "is the demo safe?" gate
+- [ ] Camera opens immediately; no landing page.
+- [ ] Face brackets align with faces.
+- [ ] Center target becomes active target.
+- [ ] Hologram/result panel stays near the face and remains on-screen.
+- [ ] Bottom dock shows only scan, mic, keyboard.
+- [ ] Buttons do not overlap brackets or text.
+- [ ] UI remains readable on large accessibility text.
+- [ ] App remains usable in portrait after relaunch.
 
-Minimum green-light before walking on stage:
+## Voice
 
-- [ ] `cd backend && npm run verify` passes.
-- [ ] iOS app launches in `mockAll` (Person A).
-- [ ] At least one chip/voice command visibly filters the room.
-- [ ] One opener drafts successfully.
-- [ ] You've rehearsed the [recovery plan](DEMO_RUNBOOK.md#recovery-plan) once.
+- [ ] Pressing mic starts listening.
+- [ ] Deepgram partial transcript appears while speaking.
+- [ ] Stopping mic submits the intended command when appropriate.
+- [ ] `Find info on him` triggers identity resolution.
+- [ ] Keyboard fallback runs the same command path.
+- [ ] No API keys are present in the iOS app bundle or source.
+
+## Identity Resolution
+
+Test on a close badge/context crop.
+
+- [ ] Result reaches `target locked`.
+- [ ] Result reaches `reading badge/context`.
+- [ ] Result reaches `searching profile`.
+- [ ] Result reaches `verifying face` when a face crop is present.
+- [ ] Result reaches `result ready`.
+- [ ] Best candidate name is shown.
+- [ ] LinkedIn button appears when a LinkedIn URL is returned.
+- [ ] Confidence state is shown as Verified, Possible, or Needs confirmation.
+- [ ] Unknown/low-confidence result does not show a wrong name.
+- [ ] Result can be saved to Brain.
+
+## Brain
+
+- [ ] First-launch mission prompt appears over the blurred app.
+- [ ] Mission can be created from a chip.
+- [ ] Mission can be created from typed text.
+- [ ] Brain graph opens.
+- [ ] Saved scan appears as a node.
+- [ ] Detail view shows profile fields and LinkedIn/email when present.
+- [ ] Lead priority is computed from the mission.
+- [ ] Lead reasons are displayed.
+- [ ] Outreach variants are generated.
+- [ ] User can choose LinkedIn DM, email, or in-person before marking sent.
+- [ ] Fake send animation/status updates the node/detail state.
+
+## Lazy GTM
+
+- [ ] Lazy GTM panel opens from the camera.
+- [ ] Voice input works.
+- [ ] Typed fallback works.
+- [ ] Request such as `Find 8 Swift engineers` creates a run.
+- [ ] Prospects render in graph/list.
+- [ ] Prospect detail shows match score, reasons, and missing info.
+- [ ] Outreach draft can be generated.
+- [ ] Fake send updates prospect status.
+
+## Docs And Repo Hygiene
+
+```bash
+python3 scripts/check_markdown_links.py
+git status --short
+```
+
+- [x] Markdown relative links resolve.
+- [ ] Only intentional files are modified.
+- [ ] No secrets in tracked files.
+- [ ] README, runbook, architecture, API contracts, and QA checklist agree.
+
+## Final Demo Gate
+
+- [ ] Backend typecheck passes.
+- [ ] Backend tests pass.
+- [ ] Convex health endpoint is reachable.
+- [ ] CV health endpoint is ready.
+- [ ] iPhone app installed and launched.
+- [ ] One real identity scan succeeds.
+- [ ] One Brain memory appears.
+- [ ] One Lazy GTM run succeeds.

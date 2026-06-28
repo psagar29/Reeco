@@ -1,4 +1,4 @@
-# Face Enrollment (Person B)
+# Face Enrollment
 
 How to turn private photos of the demo roster into the 512-d face embeddings the
 backend matches against — locally, reproducibly, and without ever committing a
@@ -21,11 +21,11 @@ real photo.
 
 ---
 
-## Why enrollment is needed
+## Why Enrollment Is Needed
 
-Recco recognizes a **fixed roster of 5 people**. To recognize someone, the
-backend needs a reference vector per person to compare a live camera crop
-against.
+Recco's known-person face matcher recognizes the seeded roster. To recognize
+someone, the backend needs a reference vector per person to compare a live
+camera crop against.
 
 The pipeline at match time:
 
@@ -49,7 +49,7 @@ fully offline.
 
 ---
 
-## How to capture good photos
+## How To Capture Good Photos
 
 One photo per person is enough for the demo. Aim for the same conditions the
 camera will see on stage.
@@ -66,7 +66,7 @@ camera will see on stage.
 
 ---
 
-## Where to place files
+## Where To Place Files
 
 The enrollment image path per person is defined in
 [`demo-data/people.sample.json`](../demo-data/people.sample.json) as
@@ -94,7 +94,7 @@ does not crash — it uses a mock embedding for that person and reports it.
 
 ---
 
-## How to start the CV service
+## How To Start The CV Service
 
 Requires **Python 3.10–3.11** (most reliable for InsightFace wheels). The
 service downloads its model pack (~125 MB for the default `buffalo_s`) into
@@ -131,7 +131,7 @@ curl http://127.0.0.1:8000/health
 
 ---
 
-## How to run `npm run enroll`
+## How To Run `npm run enroll`
 
 In a second terminal:
 
@@ -184,7 +184,7 @@ With real photos in place and the CV service ready, the per-person source reads
 
 ---
 
-## How to seed Convex with the generated embeddings
+## How To Seed Convex With The Generated Embeddings
 
 Run a local Convex deployment (no account needed) and seed it:
 
@@ -214,7 +214,7 @@ people:list` and `npx convex run state:get`. See
 
 ---
 
-## How to verify no secrets/images were committed
+## How To Verify No Secrets Or Images Were Committed
 
 Privacy-sensitive files must stay out of git. Quick checks:
 

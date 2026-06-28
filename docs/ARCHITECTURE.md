@@ -1,121 +1,253 @@
-# Architecture
+# Recco Architecture
 
-Recco is a monorepo of three runnable services plus shared contracts. They
-communicate through a small set of frozen types defined in
-[`API_CONTRACTS.md`](API_CONTRACTS.md).
+Recco is a camera-first iPhone app backed by Convex, a small CV embedding
+service, and sponsor/API integrations for identity, voice, and outreach.
 
-## Components
+The product surface is the iPhone AR lens. The backend owns secrets, scoring,
+lookup, memory, and outreach generation.
 
-### 1. iOS app — `app/ios/Recco` (SwiftUI)
+---
 
-The product surface. Camera-first, with a control strip (chips + voice/typed
-command bar + transcript ribbon), a Brain graph, profile sheets, and opener
-drafting.
+## System Overview
 
-Internally organized around a single observable **`AppModel`** that owns the
-shared `BrainState` (active filter, visible/dimmed person ids, selection,
-transcript, thinking). Every input path — manual chips, typed commands, and
-voice — funnels through one `apply(FilterCommandDTO)` method, so the camera
-overlays and the Brain graph always reflect the same state.
-
-The app talks only to a `ReccoBackend` protocol. Two implementations:
-
-- `MockBackend` — fully offline (local roster, on-device command parsing and
-  opener generation). Powers `mockAll`.
-- `ConvexBackend` — the seam to the real backend. Powers `mockCV` / `live`.
-
-The camera pipeline (capture → Vision tracking → throttle/cache → crop →
-recognize) feeds results back via `AppModel.applyMatch` and opens profiles via
-`AppModel.selectPerson`.
-
-### 2. Backend — `backend/` (Convex + TypeScript)
-
-The reactive brain. A single `appState` singleton holds the `BrainState` that
-iOS subscribes to. Pure, framework-free logic libs (`filter`, `similarity`,
-`voiceParser`, `opener`) are unit-tested without a live deployment.
-
-Functions (see contracts):
-
-| Function | Kind | Purpose |
-|----------|------|---------|
-| `people:list` | query | roster (no embeddings) |
-| `state:get` | query | the reactive `BrainState` (main iOS subscription) |
-| `state:setFilter` | mutation | recompute visible/dimmed for a `FilterCommand` |
-| `vision:matchFace` | action | CV `/embed` → cosine match → classify → record |
-| `voice:interpretCommand` | action | NL → `FilterCommand` (OpenAI + offline fallback) |
-| `drafts:createOpener` | action | opener/email (OpenAI + templated fallback) |
-| `voice:getDeepgramToken` | action | short-lived Deepgram token |
-| `identity:resolveTarget` | action | "find info on him": OpenAI Vision badge OCR → Fiber AI lookup → CV-service face verification → scored result |
-
-Plus an HTTP bridge (`convex/http.ts`, served on `.convex.site`):
-`POST /api/identity/resolve` → `identity:resolveTarget`,
-`POST /api/voice/deepgram-token` → `voice:getDeepgramToken`, `GET /api/health`.
-
-Every action degrades gracefully: no API key → deterministic offline path. The
-identity lane only ever reports `verified` when a candidate's profile photo
-face-verifies against the live face; otherwise `possible` / `not_found` /
-`needs_clarification`. All external keys (OpenAI, Fiber, Deepgram) stay
-server-side — iOS holds none of them.
-
-### 3. CV service — `cv-service/` (FastAPI + InsightFace)
-
-Stateless face → embedding. `POST /embed` accepts a JPEG/PNG (base64 or
-multipart) and returns a **512-dimensional, L2-normalized ArcFace embedding** for
-the largest face, plus quality metadata. `GET /health` reports model readiness.
-
-Default model is `buffalo_s` (MobileFaceNet recognition) for ~380 ms warm CPU
-latency; set `RECCO_CV_MODEL=buffalo_l` for the higher-accuracy ResNet50 net
-(~1.7 s warm). Enrollment and live matching must use the same model.
-
-> **Important:** enrollment and live matching must use the **same** model —
-> embeddings from `buffalo_s` and `buffalo_l` are not comparable.
-
-## Data flow
-
-```
-                         ┌──────────────────────────────────────────────┐
-                         │                  iOS app                     │
-                         │                                              │
-   voice / chips ───────►│  AppModel.apply(FilterCommand)               │
-                         │       │                                      │
-   camera frame ─► crop ─┼───────┼──► ConvexBackend.matchFace ──┐       │
-                         │       ▼                              │       │
-                         │   BrainState  ◄── state:get (reactive)│       │
-                         └───────┼──────────────────────────────┼───────┘
-                                 │                              │
-                                 ▼                              ▼
-                         ┌───────────────┐  vision:matchFace ┌──────────────┐
-                         │    backend    │ ────────────────► │  cv-service  │
-                         │   (Convex)    │   POST /embed     │ (InsightFace)│
-                         │               │ ◄──────────────── │  512-d emb   │
-                         │ cosine match  │                   └──────────────┘
-                         │ vs enrolled   │
-                         └───────────────┘
+```txt
+                 ┌─────────────────────────────────────────────┐
+                 │ iPhone app                                  │
+                 │ SwiftUI + AVFoundation + Vision             │
+                 │                                             │
+                 │ camera / face boxes / reticle / hologram    │
+                 │ mission setup / Brain graph / Lazy GTM      │
+                 └──────────────────┬──────────────────────────┘
+                                    │ HTTPS JSON
+                                    ▼
+                 ┌─────────────────────────────────────────────┐
+                 │ Convex backend                              │
+                 │ HTTP Actions + queries/mutations/actions     │
+                 │                                             │
+                 │ identity, voice tokens, Brain memories,     │
+                 │ mission scoring, GTM runs, outreach drafts  │
+                 └───────┬──────────────┬──────────────┬───────┘
+                         │              │              │
+                         ▼              ▼              ▼
+              ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+              │ CV service   │ │ OpenAI       │ │ Fiber        │
+              │ InsightFace  │ │ Vision/text  │ │ profiles/GTM │
+              └──────────────┘ └──────────────┘ └──────────────┘
+                         │
+                         ▼
+                 ┌──────────────┐
+                 │ Deepgram     │
+                 │ STT tokens   │
+                 └──────────────┘
 ```
 
-## Enrollment
+## iOS App
 
-Face matching needs enrolled embeddings stored in Convex:
+Path: `app/ios/Recco/`
 
-1. Collect 1+ photo per roster person under `demo-data/enrollment/`.
-2. Run `cd backend && npm run enroll` — sends each photo to the CV service
-   `/embed` and writes the embedding onto that person in Convex.
-3. At match time, `vision:matchFace` cosine-compares a live crop against all
-   enrolled embeddings and classifies against thresholds
-   (`strong = 0.38`, `tentative = 0.30` — re-tune per model).
+The iOS app is pure SwiftUI with system frameworks. It has no third-party
+package dependency and no backend secrets.
 
-## Contracts
+Key areas:
 
-The boundary types (`Person`, `BrainState`, `FilterCommand`, `FaceMatchResult`,
-`DraftResult`, `FaceQuality`) are frozen in [`API_CONTRACTS.md`](API_CONTRACTS.md)
-and mirrored on both sides: Swift DTOs in `app/ios/Recco/Recco/Models/` and
-TypeScript types in `backend/convex/lib/types.ts`. Changing a shape means
-updating both plus the contract doc.
+| Area | Files | Role |
+|---|---|---|
+| App shell | `ReccoApp.swift`, `Views/RootView.swift` | launches live app and injects `AppModel`. |
+| Camera | `Camera/*` | AVFoundation camera session, Vision face tracking, crops, recognition client. |
+| AR UI | `Views/AR/*`, `CommandDockView.swift` | face brackets, target reticle, scan timeline, hologram panel, minimal controls. |
+| State | `State/AppModel.swift` | single app model for camera, mission, voice, identity, Brain, GTM. |
+| Backend client | `State/Backend/ConvexBackend.swift` | `URLSession` client for Convex HTTP Actions. |
+| Brain | `Views/Brain*.swift`, `Models/BrainGraphModel.swift` | saved scan graph, details, outreach state. |
+| Mission | `Views/MissionSetupView.swift`, `Models/MissionProfileDTO.swift` | first-launch goal and scoring context. |
+| Lazy GTM | `Views/LazyGTMVoicePanelView.swift`, `Views/GTMScout*.swift`, `Models/GTMModels.swift` | voice/text prospect search graph. |
 
-## Demo modes
+Launch behavior:
 
-| Mode | Backend | CV | Notes |
-|------|---------|----|-------|
-| `mockAll` | local JSON | fake | fully offline; stage-safe default |
-| `mockCV` | Convex | deterministic | backend real, recognition faked |
-| `live` | Convex | real | full pipeline |
+- Default mode is live unless `DEMO_MODE` overrides it.
+- The app prefers `RECCO_API_BASE_URL`, then `CONVEX_URL`, then the public demo
+  backend baked into `ReccoApp.swift`.
+- Secrets are never stored in iOS.
+
+## Backend
+
+Path: `backend/`
+
+Convex owns the API, persistent state, external API calls, and all secrets.
+The iPhone calls ordinary HTTP JSON routes served by Convex HTTP Actions.
+
+Main modules:
+
+| Module | Role |
+|---|---|
+| `convex/http.ts` | public HTTP bridge used by iOS and browser tools. |
+| `convex/identity.ts` | `find info on him`: OCR, Fiber lookup, CV face verification. |
+| `convex/vision.ts` | known-person face matching against enrolled embeddings. |
+| `convex/voice.ts` | command interpretation and Deepgram token minting. |
+| `convex/mission.ts` | parses and stores today's goal. |
+| `convex/scanMemories.ts` | durable Brain memories and outreach generation. |
+| `convex/gtm.ts` | Lazy GTM prospect search, scoring, and outreach. |
+| `convex/people.ts` | public roster and private enrollment embeddings. |
+| `convex/schema.ts` | Convex tables and indexes. |
+
+Important tables:
+
+| Table | Purpose |
+|---|---|
+| `people` | demo/enrolled roster plus private face embeddings. |
+| `appState` | singleton `BrainState` for filter/highlight state. |
+| `faceMatches` | debug log of known-person match attempts. |
+| `identityLookups` | text/scores-only log of identity resolution. |
+| `scanMemories` | durable people the user scanned at an event. |
+| `missionProfiles` | one mission per anonymous client id. |
+| `gtmRuns` | Lazy GTM search requests. |
+| `gtmProspects` | prospects found for GTM runs. |
+
+## CV Service
+
+Path: `cv-service/`
+
+The CV service is a stateless FastAPI app around InsightFace. It exposes:
+
+- `GET /health`
+- `POST /embed`
+
+`/embed` accepts a base64 or multipart image and returns:
+
+- `faceDetected`
+- `embedding: number[512] | null`
+- `quality`
+- `latencyMs`
+
+Enrollment and live matching must use the same model. The current demo service
+uses `buffalo_s`.
+
+## Identity Flow
+
+```txt
+iPhone captures:
+  faceImageBase64        tight face crop
+  contextImageBase64     wider person/badge crop
+  transcript             "find info on him" or typed equivalent
+
+POST /api/identity/resolve
+  -> OpenAI Vision reads badge/context
+  -> spoken/provided name is merged as a clue
+  -> Fiber searches candidate profiles
+  -> CV embeds live face
+  -> CV embeds candidate profile photos when available
+  -> backend scores candidates
+  -> iOS receives IdentityResolveResult
+```
+
+Identity statuses:
+
+- `verified` - face verification confirmed the selected profile.
+- `possible` - profile/name found but face verification did not confirm.
+- `needs_clarification` - badge/name clue was too weak.
+- `not_found` - no usable profile candidate.
+- `error` - structured backend error.
+
+The app should never show a low-confidence face as a named person.
+
+## Brain Flow
+
+```txt
+IdentityResolveResult
+  -> /api/brain/memories/upsert
+  -> dedupe by LinkedIn, then name+company
+  -> score against MissionProfile
+  -> generate / update OutreachDraft
+  -> render in Brain graph
+```
+
+Brain memories store extracted profile text, links, confidence, notes, lead
+scores, and outreach state. They do not store raw face or badge images.
+
+## Mission Flow
+
+```txt
+first launch prompt
+  -> /api/mission/parse
+  -> MissionProfile
+  -> UserDefaults + backend missionProfiles
+  -> lead scoring for future scans
+```
+
+Examples:
+
+- `Looking for investors`
+- `Hiring a Swift engineer`
+- `Trying to get hired`
+- `Looking for customers`
+
+Mission fields influence:
+
+- lead priority
+- lead reasons
+- next action
+- outreach channel and tone
+- Brain graph grouping
+
+## Lazy GTM Flow
+
+```txt
+voice/text request
+  -> /api/gtm/run
+  -> parse GTM intent
+  -> Fiber/OpenAI-backed prospect generation
+  -> score prospects
+  -> render GTM graph/list
+  -> /api/gtm/prospects/outreach
+  -> /api/gtm/prospects/status
+```
+
+Lazy GTM prospects are separate from Brain scan memories. Scan memories are
+people the user actually encountered; GTM prospects are AI-found outbound leads.
+
+## HTTP Surface
+
+The iOS app uses the Convex `.convex.site` HTTP Actions URL, not the
+`.convex.cloud` client URL.
+
+Current primary routes:
+
+| Route | Purpose |
+|---|---|
+| `GET /api/health` | backend health. |
+| `GET /api/people` | public roster. |
+| `GET /api/state` | current `BrainState`. |
+| `POST /api/vision/match-face` | known-person face matching. |
+| `POST /api/identity/resolve` | live identity lookup. |
+| `POST /api/voice/deepgram-token` | short-lived Deepgram token. |
+| `POST /api/mission/parse` | parse/store mission. |
+| `GET /api/brain/memories` | list scan memories. |
+| `POST /api/brain/memories/upsert` | save identity result. |
+| `POST /api/brain/memories/outreach` | generate memory outreach. |
+| `POST /api/brain/memories/follow-up-status` | update fake send/follow-up state. |
+| `POST /api/gtm/run` | create Lazy GTM run. |
+| `GET /api/gtm/runs` | list GTM runs. |
+| `GET /api/gtm/prospects` | list GTM prospects. |
+| `POST /api/gtm/prospects/outreach` | generate prospect outreach. |
+| `POST /api/gtm/prospects/status` | update prospect status. |
+
+Full shapes are in [API Contracts](API_CONTRACTS.md).
+
+## Privacy Boundaries
+
+- iOS sends images only for immediate resolution.
+- Persistent Brain data stores text, links, scores, notes, and outreach state.
+- Raw face/badge images are not persisted by the app contract.
+- OpenAI, Fiber, and Deepgram keys live only in Convex env.
+- Unknown/low-confidence results should stay unnamed.
+
+## Verification
+
+Use [QA Checklist](QA_CHECKLIST.md) before demo:
+
+```bash
+cd backend
+npm run typecheck
+npm test
+curl https://fabulous-hyena-861.convex.site/api/health
+curl http://<cv-host>:8000/health
+```
