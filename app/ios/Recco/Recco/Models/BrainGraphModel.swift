@@ -14,16 +14,18 @@ enum BrainNodeKind: Equatable, Hashable {
     case eventHub
     /// One resolved person / scan memory.
     case memory
-    /// A cluster node (company / school / source / confidence bucket).
+    /// A cluster node (priority / status / company / school / source / confidence).
     case group(BrainGroupKind)
 }
 
 /// The dimension a group node clusters on.
 enum BrainGroupKind: String, Equatable, Hashable {
-    case company, school, source, confidence
+    case priority, status, company, school, source, confidence
 
     var systemImage: String {
         switch self {
+        case .priority: return "flame"
+        case .status: return "paperplane"
         case .company: return "building.2"
         case .school: return "graduationcap"
         case .source: return "dot.radiowaves.left.and.right"
@@ -34,18 +36,18 @@ enum BrainGroupKind: String, Equatable, Hashable {
 
 // MARK: - Grouping dimension (user-selectable lens)
 
-/// The active clustering lens. `none` is a clean hub-and-spoke (great for a
-/// handful of memories); the others surface emergent structure as the memory
-/// count grows. Company/school clusters only form when ≥2 memories share a
-/// value, so distinct singletons stay attached to the hub instead of spraying
-/// noise nodes.
+/// The active clustering lens. `priority` is the mission-driven default; the
+/// others surface different structure. Company/school clusters only form when
+/// ≥2 memories share a value, so distinct singletons stay attached to the hub.
 enum BrainGraphGrouping: String, CaseIterable, Identifiable {
-    case none, company, source, confidence, school
+    case priority, status, none, company, source, confidence, school
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
+        case .priority: return "Priority"
+        case .status: return "Status"
         case .none: return "Hub"
         case .company: return "Company"
         case .source: return "Source"
@@ -56,6 +58,8 @@ enum BrainGraphGrouping: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .priority: return "flame"
+        case .status: return "paperplane"
         case .none: return "circle.hexagongrid"
         case .company: return "building.2"
         case .source: return "dot.radiowaves.left.and.right"
@@ -74,22 +78,48 @@ struct BrainGraphNode: Identifiable, Equatable {
     let kind: BrainNodeKind
     let title: String
     let subtitle: String?
-    /// For `.memory` nodes: the underlying scan memory id.
     let memoryId: String?
-    /// For `.memory` / confidence-group nodes: the confidence bucket.
     let confidence: ScanConfidence?
     let hasLinkedIn: Bool
-    /// Members represented (memories under a group, or scan count on a memory).
     let memberCount: Int
-    /// Relative mass / size hint in 0…1 (verified people read a touch larger).
     let weight: Double
+    /// Lead priority (memory nodes, and priority group nodes for tinting).
+    let leadPriority: LeadPriority?
+    /// Whether this memory (or the "Sent" group) is sent.
+    let isSent: Bool
+
+    init(
+        id: String,
+        kind: BrainNodeKind,
+        title: String,
+        subtitle: String?,
+        memoryId: String?,
+        confidence: ScanConfidence?,
+        hasLinkedIn: Bool,
+        memberCount: Int,
+        weight: Double,
+        leadPriority: LeadPriority? = nil,
+        isSent: Bool = false
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.subtitle = subtitle
+        self.memoryId = memoryId
+        self.confidence = confidence
+        self.hasLinkedIn = hasLinkedIn
+        self.memberCount = memberCount
+        self.weight = weight
+        self.leadPriority = leadPriority
+        self.isSent = isSent
+    }
 
     var isMemory: Bool { if case .memory = kind { return true }; return false }
     var isHub: Bool { kind == .eventHub }
 }
 
 /// A connection. `strength` (0…1) drives both spring stiffness in the physics
-/// layer and stroke opacity in the renderer — verified links read stronger.
+/// layer and stroke opacity in the renderer — hot/verified links read stronger.
 struct BrainGraphEdge: Identifiable, Equatable {
     let source: String
     let target: String
@@ -104,7 +134,6 @@ struct BrainGraphModel: Equatable {
 
     static let empty = BrainGraphModel(nodes: [], edges: [])
 
-    /// Node ids directly connected to `id` (either edge direction).
     func neighbors(of id: String) -> Set<String> {
         var result = Set<String>()
         for e in edges {
@@ -114,8 +143,6 @@ struct BrainGraphModel: Equatable {
         return result
     }
 
-    /// Memory-node ids reachable under a group/hub node (its direct memory
-    /// members). Used to decide whether a cluster should dim under a filter.
     func memoryMembers(of id: String) -> Set<String> {
         let memoryIds = Set(nodes.filter { $0.isMemory }.map(\.id))
         return neighbors(of: id).filter { memoryIds.contains($0) }
@@ -127,8 +154,6 @@ struct BrainGraphModel: Equatable {
 enum BrainGraphBuilder {
     static let hubId = "event_hub"
 
-    /// Spring/edge strength + size weight for a confidence bucket. Stronger for
-    /// verified, weakest for unknown — matches the spec's edge-weight intent.
     static func weight(for confidence: ScanConfidence) -> Double {
         switch confidence {
         case .verified: return 1.0
@@ -138,16 +163,23 @@ enum BrainGraphBuilder {
         }
     }
 
-    /// Build the graph for a set of memories under the given lens. Topology
-    /// depends only on `(memories, grouping)` — never on the search query — so
-    /// searching/filtering only dims nodes and never re-lays-out the graph.
+    /// Edge/size weight for a priority. Hot leads pull strongest.
+    static func weight(for priority: LeadPriority?) -> Double {
+        switch priority {
+        case .hot: return 1.0
+        case .warm: return 0.8
+        case .cold: return 0.58
+        case .needsInfo: return 0.45
+        case .none: return 0.5
+        }
+    }
+
     static func build(memories: [ScanMemoryDTO], grouping: BrainGraphGrouping) -> BrainGraphModel {
         guard !memories.isEmpty else { return .empty }
 
         var nodes: [BrainGraphNode] = []
         var edges: [BrainGraphEdge] = []
 
-        // Central hub.
         nodes.append(BrainGraphNode(
             id: hubId, kind: .eventHub, title: "Event",
             subtitle: "\(memories.count) memor\(memories.count == 1 ? "y" : "ies")",
@@ -155,32 +187,30 @@ enum BrainGraphBuilder {
             memberCount: memories.count, weight: 1
         ))
 
-        // Memory nodes.
         for m in memories {
+            let w = m.leadPriority != nil ? weight(for: m.leadPriority) : weight(for: m.confidence)
             nodes.append(BrainGraphNode(
                 id: m.id, kind: .memory, title: m.displayName,
                 subtitle: m.roleCompanyLine, memoryId: m.id,
                 confidence: m.confidence, hasLinkedIn: m.hasLinkedIn,
-                memberCount: m.scanCount, weight: weight(for: m.confidence)
+                memberCount: m.scanCount, weight: w,
+                leadPriority: m.leadPriority, isSent: m.isSent
             ))
         }
 
-        // Edges depend on the lens.
         switch grouping {
         case .none:
             for m in memories { edges.append(hubEdge(to: m)) }
-
+        case .priority:
+            attachByPriority(memories, nodes: &nodes, edges: &edges)
+        case .status:
+            attachByStatus(memories, nodes: &nodes, edges: &edges)
         case .company:
-            attachByField(memories, field: { $0.company }, kind: .company,
-                          minCluster: 2, nodes: &nodes, edges: &edges)
-
+            attachByField(memories, field: { $0.company }, kind: .company, minCluster: 2, nodes: &nodes, edges: &edges)
         case .school:
-            attachByField(memories, field: { $0.school }, kind: .school,
-                          minCluster: 2, nodes: &nodes, edges: &edges)
-
+            attachByField(memories, field: { $0.school }, kind: .school, minCluster: 2, nodes: &nodes, edges: &edges)
         case .confidence:
             attachByConfidence(memories, nodes: &nodes, edges: &edges)
-
         case .source:
             attachBySource(memories, nodes: &nodes, edges: &edges)
         }
@@ -190,8 +220,12 @@ enum BrainGraphBuilder {
 
     // MARK: - Edge helpers
 
+    private static func memoryStrength(_ m: ScanMemoryDTO) -> Double {
+        m.leadPriority != nil ? weight(for: m.leadPriority) : weight(for: m.confidence)
+    }
+
     private static func hubEdge(to m: ScanMemoryDTO) -> BrainGraphEdge {
-        BrainGraphEdge(source: hubId, target: m.id, strength: weight(for: m.confidence))
+        BrainGraphEdge(source: hubId, target: m.id, strength: memoryStrength(m))
     }
 
     private static func clean(_ s: String?) -> String? {
@@ -199,9 +233,73 @@ enum BrainGraphBuilder {
         return t
     }
 
-    /// Cluster on a single text field (company/school). A value becomes a group
-    /// node only once `minCluster` memories share it; lone values attach to the
-    /// hub directly so distinct singletons never spray noise nodes.
+    /// Priority lens (the mission default): Hot / Warm / Cold / Needs info, plus a
+    /// Sent cluster for memories already followed up. Unscored memories hang off
+    /// the hub. Hot edges are strongest.
+    private static func attachByPriority(
+        _ memories: [ScanMemoryDTO],
+        nodes: inout [BrainGraphNode],
+        edges: inout [BrainGraphEdge]
+    ) {
+        let order: [LeadPriority] = [.hot, .warm, .cold, .needsInfo]
+
+        // Sent cluster first (overrides priority bucket).
+        let sent = memories.filter { $0.isSent }
+        if !sent.isEmpty {
+            let gid = "grp_status_sent"
+            nodes.append(BrainGraphNode(
+                id: gid, kind: .group(.status), title: "Sent", subtitle: "\(sent.count)",
+                memoryId: nil, confidence: nil, hasLinkedIn: false,
+                memberCount: sent.count, weight: 0.6, leadPriority: nil, isSent: true
+            ))
+            edges.append(BrainGraphEdge(source: hubId, target: gid, strength: 0.7))
+            for m in sent { edges.append(BrainGraphEdge(source: gid, target: m.id, strength: 0.6)) }
+        }
+
+        for level in order {
+            let members = memories.filter { !$0.isSent && $0.leadPriority == level }
+            guard !members.isEmpty else { continue }
+            let gid = "grp_priority_\(level.rawValue)"
+            nodes.append(BrainGraphNode(
+                id: gid, kind: .group(.priority), title: level.label, subtitle: "\(members.count)",
+                memoryId: nil, confidence: nil, hasLinkedIn: false,
+                memberCount: members.count, weight: 0.6, leadPriority: level, isSent: false
+            ))
+            edges.append(BrainGraphEdge(source: hubId, target: gid, strength: weight(for: level)))
+            for m in members {
+                edges.append(BrainGraphEdge(source: gid, target: m.id, strength: weight(for: level)))
+            }
+        }
+
+        // Unscored memories attach to the hub directly.
+        for m in memories where !m.isSent && m.leadPriority == nil {
+            edges.append(hubEdge(to: m))
+        }
+    }
+
+    /// Follow-up status lens.
+    private static func attachByStatus(
+        _ memories: [ScanMemoryDTO],
+        nodes: inout [BrainGraphNode],
+        edges: inout [BrainGraphEdge]
+    ) {
+        let order: [FollowUpStatus] = [.new, .drafted, .edited, .sent, .archived]
+        for status in order {
+            let members = memories.filter { $0.followUpStatus == status }
+            guard !members.isEmpty else { continue }
+            let gid = "grp_status_\(status.rawValue)"
+            nodes.append(BrainGraphNode(
+                id: gid, kind: .group(.status), title: status.label, subtitle: "\(members.count)",
+                memoryId: nil, confidence: nil, hasLinkedIn: false,
+                memberCount: members.count, weight: 0.58, leadPriority: nil, isSent: status == .sent
+            ))
+            edges.append(BrainGraphEdge(source: hubId, target: gid, strength: 0.65))
+            for m in members {
+                edges.append(BrainGraphEdge(source: gid, target: m.id, strength: memoryStrength(m)))
+            }
+        }
+    }
+
     private static func attachByField(
         _ memories: [ScanMemoryDTO],
         field: (ScanMemoryDTO) -> String?,
@@ -210,7 +308,6 @@ enum BrainGraphBuilder {
         nodes: inout [BrainGraphNode],
         edges: inout [BrainGraphEdge]
     ) {
-        // Group memories by a normalized key, preserving the first display value.
         var buckets: [String: (display: String, members: [ScanMemoryDTO])] = [:]
         var order: [String] = []
         for m in memories {
@@ -224,22 +321,20 @@ enum BrainGraphBuilder {
         for key in order {
             guard let bucket = buckets[key], bucket.members.count >= minCluster else { continue }
             let groupId = "grp_\(kind.rawValue)_\(key)"
-            let avg = bucket.members.map { weight(for: $0.confidence) }.reduce(0, +) / Double(bucket.members.count)
+            let avg = bucket.members.map { memoryStrength($0) }.reduce(0, +) / Double(bucket.members.count)
             nodes.append(groupNode(id: groupId, kind: kind, title: bucket.display, count: bucket.members.count))
             edges.append(BrainGraphEdge(source: hubId, target: groupId, strength: max(0.6, avg)))
             for m in bucket.members {
-                edges.append(BrainGraphEdge(source: groupId, target: m.id, strength: weight(for: m.confidence)))
+                edges.append(BrainGraphEdge(source: groupId, target: m.id, strength: memoryStrength(m)))
                 clustered.insert(m.id)
             }
         }
 
-        // Everything that didn't cluster hangs off the hub.
         for m in memories where !clustered.contains(m.id) {
             edges.append(hubEdge(to: m))
         }
     }
 
-    /// One bucket node per confidence level present in the set.
     private static func attachByConfidence(
         _ memories: [ScanMemoryDTO],
         nodes: inout [BrainGraphNode],
@@ -250,13 +345,11 @@ enum BrainGraphBuilder {
             let members = memories.filter { $0.confidence == level }
             guard !members.isEmpty else { continue }
             let groupId = "grp_confidence_\(level.rawValue)"
-            var node = groupNode(id: groupId, kind: .confidence, title: level.label, count: members.count)
-            node = BrainGraphNode(
-                id: node.id, kind: node.kind, title: node.title, subtitle: node.subtitle,
+            nodes.append(BrainGraphNode(
+                id: groupId, kind: .group(.confidence), title: level.label, subtitle: "\(members.count)",
                 memoryId: nil, confidence: level, hasLinkedIn: false,
-                memberCount: node.memberCount, weight: node.weight
-            )
-            nodes.append(node)
+                memberCount: members.count, weight: 0.55
+            ))
             edges.append(BrainGraphEdge(source: hubId, target: groupId, strength: weight(for: level)))
             for m in members {
                 edges.append(BrainGraphEdge(source: groupId, target: m.id, strength: weight(for: level)))
@@ -264,9 +357,6 @@ enum BrainGraphBuilder {
         }
     }
 
-    /// Source lens: a memory can carry several sources, so it links to each of
-    /// its source clusters (badge/fiber/face/voice/roster). Multi-edges here are
-    /// the point — they show how a person was pieced together.
     private static func attachBySource(
         _ memories: [ScanMemoryDTO],
         nodes: inout [BrainGraphNode],
@@ -291,7 +381,7 @@ enum BrainGraphBuilder {
                 edges.append(hubEdge(to: m))
             } else {
                 for s in sources {
-                    edges.append(BrainGraphEdge(source: "grp_source_\(s)", target: m.id, strength: weight(for: m.confidence)))
+                    edges.append(BrainGraphEdge(source: "grp_source_\(s)", target: m.id, strength: memoryStrength(m)))
                 }
             }
         }

@@ -16,16 +16,18 @@ struct BrainView: View {
 
     // Graph state.
     @State private var mode: BrainMode = .graph
-    @State private var grouping: BrainGraphGrouping = .company
+    @State private var grouping: BrainGraphGrouping = .priority
     @State private var selectedNodeId: String?
     @State private var recenterToken = 0
+    @State private var showMissionEdit = false
 
     var body: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 11) {
                 header
+                missionPill
                 searchField
                 toolbarRow
                 filterBar
@@ -43,6 +45,37 @@ struct BrainView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.ultraThinMaterial)
         }
+        .sheet(isPresented: $showMissionEdit) {
+            MissionSetupView(isEditing: true, onDone: { showMissionEdit = false })
+                .environment(appModel)
+                .presentationDetents([.height(440)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.ultraThinMaterial)
+        }
+    }
+
+    // MARK: - Mission pill
+
+    private var missionPill: some View {
+        Button { showMissionEdit = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: appModel.missionProfile?.goalType.systemImage ?? "target")
+                    .font(.caption2.weight(.bold))
+                Text(appModel.missionProfile.map { "Mission · \($0.label)" } ?? "Set today's goal")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Image(systemName: "pencil")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(Theme.accentSoft, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Edit mission")
     }
 
     // MARK: - Header
@@ -282,9 +315,11 @@ struct BrainView: View {
     private func passes(_ m: ScanMemoryDTO) -> Bool {
         switch filter {
         case .all: return true
-        case .verified: return m.confidence == .verified
-        case .possible: return m.confidence == .possible
-        case .needs: return m.confidence == .needsConfirmation
+        case .hot: return m.leadPriority == .hot
+        case .warm: return m.leadPriority == .warm
+        case .cold: return m.leadPriority == .cold
+        case .needsInfo: return m.leadPriority == .needsInfo
+        case .sent: return m.isSent
         case .linkedin: return m.hasLinkedIn
         }
     }
@@ -292,14 +327,16 @@ struct BrainView: View {
     enum BrainMode { case graph, list }
 
     enum MemoryFilter: String, CaseIterable, Identifiable {
-        case all, verified, possible, needs, linkedin
+        case all, hot, warm, cold, needsInfo, sent, linkedin
         var id: String { rawValue }
         var label: String {
             switch self {
             case .all: return "All"
-            case .verified: return "Verified"
-            case .possible: return "Possible"
-            case .needs: return "Needs confirm"
+            case .hot: return "Hot"
+            case .warm: return "Warm"
+            case .cold: return "Cold"
+            case .needsInfo: return "Needs info"
+            case .sent: return "Sent"
             case .linkedin: return "LinkedIn"
             }
         }
@@ -314,10 +351,14 @@ struct MemoryRef: Identifiable { let id: String }
 private struct MemoryRow: View {
     let memory: ScanMemoryDTO
 
+    private var dotColor: Color {
+        memory.leadPriority?.color ?? memory.confidence.color
+    }
+
     var body: some View {
         HStack(spacing: 11) {
             Circle()
-                .fill(memory.confidence.color)
+                .fill(dotColor)
                 .frame(width: 9, height: 9)
                 .overlay(Circle().strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
 
@@ -337,7 +378,11 @@ private struct MemoryRow: View {
             Spacer(minLength: 6)
 
             VStack(alignment: .trailing, spacing: 4) {
-                ConfidencePill(confidence: memory.confidence)
+                if let priority = memory.leadPriority {
+                    PriorityPill(priority: priority, sent: memory.isSent)
+                } else {
+                    ConfidencePill(confidence: memory.confidence)
+                }
                 HStack(spacing: 6) {
                     if memory.hasLinkedIn {
                         Image(systemName: "link")
@@ -355,6 +400,29 @@ private struct MemoryRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 11)
         .glassCard(corner: 12)
+    }
+}
+
+/// Lead priority chip used in the row and the detail header. Shows "Sent" (green)
+/// when the memory has been followed up.
+struct PriorityPill: View {
+    let priority: LeadPriority
+    var sent: Bool = false
+
+    var body: some View {
+        let color = sent ? LeadStyle.sent : priority.color
+        let icon = sent ? "checkmark.circle.fill" : priority.systemImage
+        let text = sent ? "Sent" : priority.label
+        return HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .semibold))
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.16), in: Capsule())
     }
 }
 

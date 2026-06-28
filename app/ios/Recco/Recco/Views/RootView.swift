@@ -39,7 +39,16 @@ struct RootView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 6)
+
+            // First-launch mission setup, over the blurred live app.
+            if !appModel.hasCompletedMissionSetup {
+                MissionSetupView()
+                    .environment(appModel)
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
         }
+        .animation(.easeInOut(duration: 0.3), value: appModel.hasCompletedMissionSetup)
         .background(Theme.bg)
         .onPreferenceChange(DockTopKey.self) { top in
             if top.isFinite, top > 1 { dockTopGlobalY = top }

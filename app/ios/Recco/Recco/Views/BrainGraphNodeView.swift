@@ -53,12 +53,21 @@ struct BrainGraphNodeView: View {
         .shadow(color: Theme.accent.opacity(0.35), radius: 16)
     }
 
+    /// Priority wins for the ring color; confidence is the fallback for unscored.
+    private var ringColor: Color {
+        node.leadPriority?.color ?? node.confidence?.color ?? Theme.textTertiary
+    }
+
+    private var isHot: Bool { node.leadPriority == .hot }
+
     private var memoryCircle: some View {
-        let ring = node.confidence?.color ?? Theme.textTertiary
+        let ring = ringColor
+        let glow = selected ? Theme.accent.opacity(0.55)
+            : (isHot ? ring.opacity(0.5) : .black.opacity(0.35))
         return ZStack {
             Circle().fill(Theme.surfaceStrong)
-            Circle().strokeBorder(selected ? Theme.accent : ring.opacity(0.85),
-                                  lineWidth: selected ? 3 : 2)
+            Circle().strokeBorder(selected ? Theme.accent : ring.opacity(0.9),
+                                  lineWidth: selected ? 3 : (isHot ? 2.5 : 2))
             Text(initials)
                 .font(.system(size: diameter * 0.34, weight: .bold, design: .rounded))
                 .foregroundStyle(Theme.textPrimary)
@@ -67,30 +76,38 @@ struct BrainGraphNodeView: View {
                 .padding(diameter * 0.16)
 
             if node.hasLinkedIn {
-                Image(systemName: "link")
-                    .font(.system(size: max(8, diameter * 0.22), weight: .bold))
-                    .foregroundStyle(.black)
-                    .frame(width: diameter * 0.42, height: diameter * 0.42)
-                    .background(Theme.accent, in: Circle())
-                    .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 1.5))
+                badge(systemName: "link", tint: Theme.accent)
                     .offset(x: diameter * 0.34, y: -diameter * 0.34)
             }
+            if node.isSent {
+                badge(systemName: "checkmark", tint: LeadStyle.sent)
+                    .offset(x: -diameter * 0.34, y: -diameter * 0.34)
+            }
         }
-        .shadow(color: selected ? Theme.accent.opacity(0.55) : .black.opacity(0.35),
-                radius: selected ? 16 : 6)
+        .shadow(color: glow, radius: selected ? 16 : (isHot ? 12 : 6))
+    }
+
+    private func badge(systemName: String, tint: Color) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: max(8, diameter * 0.22), weight: .bold))
+            .foregroundStyle(.black)
+            .frame(width: diameter * 0.42, height: diameter * 0.42)
+            .background(tint, in: Circle())
+            .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 1.5))
     }
 
     private func groupCircle(_ kind: BrainGroupKind) -> some View {
-        let tint = node.confidence?.color ?? Theme.textSecondary
+        let tint = node.leadPriority?.color
+            ?? (node.isSent ? LeadStyle.sent : (node.confidence?.color ?? Theme.textSecondary))
         return ZStack {
             Circle().fill(Theme.surface)
-            Circle().strokeBorder(selected ? Theme.accent.opacity(0.9) : tint.opacity(0.4),
-                                  lineWidth: selected ? 2 : 1)
-            Image(systemName: kind.systemImage)
+            Circle().strokeBorder(selected ? Theme.accent.opacity(0.9) : tint.opacity(0.5),
+                                  lineWidth: selected ? 2 : 1.2)
+            Image(systemName: node.isSent ? "checkmark" : kind.systemImage)
                 .font(.system(size: diameter * 0.34, weight: .semibold))
-                .foregroundStyle(tint.opacity(0.9))
+                .foregroundStyle(tint.opacity(0.95))
         }
-        .opacity(0.92)
+        .opacity(0.95)
         .shadow(color: selected ? Theme.accent.opacity(0.4) : .clear, radius: 10)
     }
 
