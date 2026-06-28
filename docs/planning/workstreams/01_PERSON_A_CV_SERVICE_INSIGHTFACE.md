@@ -20,7 +20,7 @@ Build the Python face-embedding service that receives a face image and returns a
 ## Read first
 
 1. `docs/API_CONTRACTS.md`
-2. `docs/OPEN_SOURCE_REPOS.md`
+2. `docs/planning/OPEN_SOURCE_REPOS.md`
 
 ## Required deliverables
 

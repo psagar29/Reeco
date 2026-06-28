@@ -24,8 +24,8 @@ Build the camera-first iOS experience: live camera, face boxes, stable tracking,
 ## Read first
 
 1. `docs/API_CONTRACTS.md`
-2. Person B brief: `docs/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md`
-3. Person D brief: `docs/workstreams/04_PERSON_D_IOS_VOICE_BRAIN_DEMO.md`
+2. Person B brief: `docs/planning/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md`
+3. Person D brief: `docs/planning/workstreams/04_PERSON_D_IOS_VOICE_BRAIN_DEMO.md`
 
 ## Required deliverables
 

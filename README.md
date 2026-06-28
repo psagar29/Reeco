@@ -6,7 +6,7 @@
 people are and why they're worth talking to, filter the crowd by voice, and
 draft a warm opener in one tap.
 
-[Architecture](docs/ARCHITECTURE.md) · [API Contracts](docs/API_CONTRACTS.md) · [Contributing](CONTRIBUTING.md)
+[Architecture](docs/ARCHITECTURE.md) · [API Contracts](docs/API_CONTRACTS.md) · [Demo Runbook](docs/DEMO_RUNBOOK.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -74,6 +74,13 @@ npm run dev          # starts `convex dev` (requires a Convex project + env keys
 Env keys live in `backend/.env.local` (see `backend/.env.local.example`). See
 [`backend/README.md`](backend/README.md).
 
+> **Windows note:** to run a **local** Convex deployment without an account, set
+> `CONVEX_AGENT_MODE=anonymous` first —
+> PowerShell: `$env:CONVEX_AGENT_MODE="anonymous"; npx convex dev` ·
+> Git Bash: `CONVEX_AGENT_MODE=anonymous npx convex dev`. Run any
+> `npx convex run ...` command that takes a **JSON argument** from **Git Bash**
+> (PowerShell 5.1 mangles embedded double quotes).
+
 ### CV service (face embeddings)
 
 Requires **Python 3.10–3.11** (InsightFace wheels). [`uv`](https://docs.astral.sh/uv/) makes this painless:
@@ -85,6 +92,10 @@ uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python -m uvicorn main:app --port 8000
 curl localhost:8000/health     # {"ok":true,"model":"buffalo_s","ready":true}
 ```
+
+> **Windows note:** the venv interpreter is `.venv/Scripts/python` (not
+> `.venv/bin/python`). Activate with `. .venv/Scripts/Activate.ps1` (PowerShell)
+> or `source .venv/Scripts/activate` (Git Bash), then `uvicorn main:app --port 8000`.
 
 See [`cv-service/README.md`](cv-service/README.md).
 
@@ -100,14 +111,17 @@ The iOS app supports three fallback levels so a demo can always recover:
 
 ## Status
 
-All four components are individually built and verified:
+Each component is built and individually checked; the live path is wired in code
+but still needs real enrollment, deployed service URLs, and physical-device
+threshold tuning before a public demo.
 
-- ✅ **iOS** — builds + runs in mock mode (camera, Brain, voice/chips, profiles, drafts)
-- ✅ **Backend** — 49 unit tests passing; all contract functions implemented
-- ✅ **CV service** — live-tested: 512-d L2-normalized embeddings, ~380 ms warm
-  on CPU (default `buffalo_s`)
-- 🔌 **Integration** — wiring the iOS `live` mode to Convex, deploying + seeding the
-  backend, real face enrollment, and on-device threshold tuning are the remaining work
+- ✅ **Backend** — typecheck clean, **49 unit tests passing**, smoke script green; Convex functions and the iOS HTTP bridge are implemented.
+- ✅ **iOS** — builds/runs in `mockAll`; `mockCV` / `live` can call the backend HTTP bridge when `RECCO_API_BASE_URL` is configured.
+- ✅ **CV service** — FastAPI + InsightFace service is present and `py_compile`-clean; default `buffalo_s` produces 512-d L2-normalized embeddings when installed on Python 3.10-3.11.
+- 🔌 **Remaining live-demo work** — collect real enrollment photos, generate/load embeddings, deploy or run Convex + CV service, set iOS backend URL, and tune thresholds on a real iPhone.
+
+Run a demo with [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md); verify components
+with [`docs/QA_CHECKLIST.md`](docs/QA_CHECKLIST.md).
 
 ## Credits
 

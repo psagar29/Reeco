@@ -28,7 +28,7 @@ Build the iOS app shell around the camera: shared state, voice commands, manual 
 
 1. `docs/API_CONTRACTS.md`
 2. `demo-data/people.sample.json`
-3. Person C brief: `docs/workstreams/03_PERSON_C_IOS_CAMERA_OVERLAY.md`
+3. Person C brief: `docs/planning/workstreams/03_PERSON_C_IOS_CAMERA_OVERLAY.md`
 
 ## Required deliverables
 
