@@ -3,15 +3,11 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 71;
 	objects = {
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		AA00000000000000000000A1 /* Recco */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Recco;
-			sourceTree = "<group>";
-		};
+		AA00000000000000000000A1 /* Recco */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Recco; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -36,7 +32,6 @@
 		AA00000000000000000000C2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AA00000000000000000000D1 /* Recco.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,7 +56,6 @@
 			);
 			name = Recco;
 			productName = Recco;
-			productReference = AA00000000000000000000D1 /* Recco.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -89,7 +83,6 @@
 			);
 			mainGroup = AA00000000000000000000C1;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			productRefGroup = AA00000000000000000000C2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -242,6 +235,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = 93Y27U86WD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Recco uses the camera to recognize people you meet at the event.";
@@ -273,6 +267,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = 93Y27U86WD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Recco uses the camera to recognize people you meet at the event.";
