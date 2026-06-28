@@ -254,6 +254,15 @@ final class AppModel {
         state.updatedAt = now()
     }
 
+    /// Recognize a face crop through the demo-mode-aware backend (Person C's
+    /// camera seam). `mockAll`/`mockCV` return deterministic matches; `live`
+    /// calls Person B's `vision:matchFace` Convex action. The camera never
+    /// reaches the CV service directly and holds no secrets — it goes through
+    /// here so demo-mode switching stays centralized.
+    func recognizeFace(imageBase64: String, trackId: String) async throws -> FaceMatchResultDTO {
+        try await backend.matchFace(imageBase64: imageBase64, imageMimeType: "image/jpeg", trackId: trackId)
+    }
+
     // MARK: - Drafting
 
     func draftOpener(for personId: String, userGoal: String? = nil) async {

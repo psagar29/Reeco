@@ -12,8 +12,9 @@ struct RootView: View {
         @Bindable var model = appModel
 
         ZStack {
-            // Hero: the camera (placeholder until Person C drops in the real one).
-            CameraPlaceholderView()
+            // Hero: Person C's real AVFoundation + Vision camera. Falls back to a
+            // simulated face source automatically on the Simulator (no device).
+            CameraView(appModel: appModel)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
