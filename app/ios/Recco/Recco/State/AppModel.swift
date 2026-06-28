@@ -42,7 +42,9 @@ final class AppModel {
     // MARK: - Backend
 
     private var backend: ReccoBackend
-    private let convexURL: URL?
+    /// Backend base URL (`RECCO_API_BASE_URL`, else `CONVEX_URL`). `nil` means
+    /// no live backend — the app runs on the local fallback.
+    private let apiBaseURL: URL?
 
     // MARK: - Convenience accessors (mirror the BrainState fields)
 
@@ -70,22 +72,22 @@ final class AppModel {
 
     // MARK: - Init
 
-    init(demoMode: DemoMode = .default, convexURL: URL? = nil) {
+    init(demoMode: DemoMode = .default, apiBaseURL: URL? = nil) {
         self.demoMode = demoMode
-        self.convexURL = convexURL
+        self.apiBaseURL = apiBaseURL
         // Seed with bundled roster immediately so the UI is never empty, even
         // before `bootstrap()` runs.
         let seed = RosterStore.loadBundledPeople()
-        self.backend = AppModel.makeBackend(mode: demoMode, people: seed, convexURL: convexURL)
+        self.backend = AppModel.makeBackend(mode: demoMode, people: seed, apiBaseURL: apiBaseURL)
         ingest(people: seed)
     }
 
-    private static func makeBackend(mode: DemoMode, people: [PersonDTO], convexURL: URL?) -> ReccoBackend {
+    private static func makeBackend(mode: DemoMode, people: [PersonDTO], apiBaseURL: URL?) -> ReccoBackend {
         switch mode {
         case .mockAll:
             return MockBackend(people: people)
         case .mockCV, .live:
-            return ConvexBackend(convexURL: convexURL, mode: mode, fallbackPeople: people)
+            return ConvexBackend(baseURL: apiBaseURL, mode: mode, fallbackPeople: people)
         }
     }
 
@@ -93,10 +95,15 @@ final class AppModel {
 
     /// Load the roster from the active backend. Safe to call repeatedly.
     func bootstrap() async {
+        // Make a backend mode with no URL obvious instead of silently mock-y.
+        if demoMode.usesBackend && apiBaseURL == nil {
+            statusMessage = "\(demoMode.title): no backend URL — running local fallback. Set RECCO_API_BASE_URL."
+        }
         do {
             let loaded = try await backend.listPeople()
             ingest(people: loaded)
         } catch {
+            // Keep the already-seeded roster; just say why it's local.
             statusMessage = "Using local roster (\(error.localizedDescription))"
         }
     }
@@ -117,7 +124,7 @@ final class AppModel {
     func setDemoMode(_ mode: DemoMode) {
         guard mode != demoMode else { return }
         demoMode = mode
-        backend = AppModel.makeBackend(mode: mode, people: people, convexURL: convexURL)
+        backend = AppModel.makeBackend(mode: mode, people: people, apiBaseURL: apiBaseURL)
         statusMessage = "Demo mode: \(mode.title)"
         Task { await bootstrap() }
     }
@@ -181,7 +188,10 @@ final class AppModel {
             // 4. Apply through the same path as chips.
             apply(command)
         } catch {
-            statusMessage = "Couldn't interpret command: \(error.localizedDescription)"
+            // Safe fallback: interpret on-device so voice/typed commands keep
+            // working even if the backend is down. (Filtering is non-destructive.)
+            apply(CommandInterpreter.interpret(text, people: people))
+            statusMessage = "Backend unavailable — interpreted locally."
         }
 
         // 5. Done thinking.
@@ -198,8 +208,9 @@ final class AppModel {
 
     // MARK: - Manual chips
 
-    /// Toggle a single tag chip. Multiple active chips AND together. Routes
-    /// through the exact same `apply` path as voice/typed commands.
+    /// Toggle a single tag chip. Multiple active chips OR together (matching the
+    /// backend filter semantics). Routes through the exact same `apply` path as
+    /// voice/typed commands.
     func toggleTag(_ tag: String) {
         var include = Set(state.activeFilter.action == .reset ? [] : state.activeFilter.includeTags)
         if include.contains(tag) {
@@ -242,6 +253,13 @@ final class AppModel {
         state.updatedAt = now()
     }
 
+    /// Set the user-visible status line. Used by the camera lane to explain
+    /// degraded states (e.g. live mode on the Simulator, where there are no real
+    /// pixels to recognize) without faking a match.
+    func setStatus(_ message: String?) {
+        statusMessage = message
+    }
+
     // MARK: - Face match ingestion (Person C feeds camera results here)
 
     /// Apply a recognition result: record the match and highlight the person so
@@ -266,14 +284,17 @@ final class AppModel {
     // MARK: - Drafting
 
     func draftOpener(for personId: String, userGoal: String? = nil) async {
-        guard peopleById[personId] != nil else { return }
+        guard let person = peopleById[personId] else { return }
         isDrafting = true
         draft = nil
         do {
             let result = try await backend.createOpener(personId: personId, userGoal: userGoal)
             draft = result
         } catch {
-            statusMessage = "Couldn't draft opener: \(error.localizedDescription)"
+            // Safe fallback: generate the opener on-device so the demo never
+            // ends on an empty draft sheet.
+            draft = OpenerGenerator.draft(for: person, userGoal: userGoal)
+            statusMessage = "Backend unavailable — drafted locally."
         }
         isDrafting = false
     }

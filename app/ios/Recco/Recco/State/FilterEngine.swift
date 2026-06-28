@@ -36,21 +36,16 @@ enum FilterEngine {
             for person in people {
                 let tagSet = Set(person.tags)
                 let hasExcluded = !tagSet.isDisjoint(with: exclude)
-                // Match = contains ALL requested include tags (AND semantics:
-                // "AI founders" means AI and Founder), and no excluded tag.
-                let hasAllIncluded = include.isSubset(of: tagSet)
-                if hasAllIncluded && !hasExcluded {
+                // OR semantics (matches the backend `state:setFilter` rule):
+                // visible if the person has ANY requested include tag — "AI
+                // founders" surfaces everyone tagged AI or Founder — and no
+                // excluded tag. Empty include means everyone (minus excludes).
+                let hasAnyIncluded = include.isEmpty || !tagSet.isDisjoint(with: include)
+                if hasAnyIncluded && !hasExcluded {
                     visible.append(person.id)
                 } else {
                     dimmed.append(person.id)
                 }
-            }
-
-            // Safety net: if AND-matching produced nobody (e.g. an odd combo),
-            // fall back to OR-matching so the demo never goes blank.
-            if visible.isEmpty && !include.isEmpty {
-                visible = people.filter { !Set($0.tags).isDisjoint(with: include) }.map(\.id)
-                dimmed = people.map(\.id).filter { !visible.contains($0) }
             }
 
             // For rank, order visible by how many include-tags they hit.

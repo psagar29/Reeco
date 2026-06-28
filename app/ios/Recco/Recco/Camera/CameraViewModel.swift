@@ -111,6 +111,11 @@ final class CameraViewModel {
     private func startSimulated() {
         guard simTask == nil else { return }
         usingSimulatedSource = true
+        // Live recognition needs real pixels; the simulated source has none, so
+        // be explicit rather than silently showing no overlays in live mode.
+        if appModel.demoMode == .live {
+            appModel.setStatus("Live mode: Simulator has no camera — face matching is paused. Use a device, or switch to Mock CV.")
+        }
         simTask = Task { @MainActor in
             while !Task.isCancelled {
                 processSimulated()

@@ -96,7 +96,7 @@ struct CameraView: View {
     /// Place the card just below the face box, clamped on-screen.
     private func cardPosition(for box: CGRect, in size: CGSize) -> CGPoint {
         let cardHalfWidth: CGFloat = 95
-        let cardHalfHeight: CGFloat = 60
+        let cardHalfHeight: CGFloat = 72   // card includes the LinkedIn pill row
         let x = min(max(box.midX, cardHalfWidth + 8), size.width - cardHalfWidth - 8)
         var y = box.maxY + cardHalfHeight + 10
         if y + cardHalfHeight > size.height - 100 {   // would hit the control strip

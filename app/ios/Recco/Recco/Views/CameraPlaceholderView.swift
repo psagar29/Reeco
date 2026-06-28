@@ -96,12 +96,24 @@ private struct CameraBackdrop: View {
 }
 
 /// Overlay card anchored to a (mock) face. Reusable by Person C for real boxes.
-/// Shows name, role/company, a couple of tags, and the why-talk line. Dims when
-/// the active filter excludes the person.
+/// Shows name, role/company, a couple of tags, the why-talk line, and a direct
+/// LinkedIn affordance when present. Dims when the active filter excludes the
+/// person. Kept compact so several can share the screen without overlapping.
+///
+/// Tap behavior: the LinkedIn pill is a `Link`, which consumes its own tap and
+/// opens the profile in Safari directly; tapping anywhere else on the card still
+/// falls through to the parent's `onTapGesture` (open the full `ProfileSheet`).
 struct FaceOverlayCard: View {
     let person: PersonDTO
     var dimmed: Bool = false
     var highlighted: Bool = false
+
+    /// Direct LinkedIn URL if the roster has one.
+    private var linkedInURL: URL? {
+        guard let raw = person.links.linkedin,
+              !raw.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return URL(string: raw)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -114,6 +126,7 @@ struct FaceOverlayCard: View {
                     Text("\(person.role) · \(person.company)")
                         .font(.caption2)
                         .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
                 }
             }
             FlowTags(tags: person.tags, limit: 3)
@@ -121,6 +134,24 @@ struct FaceOverlayCard: View {
                 .font(.caption2)
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(2)
+
+            if let linkedInURL {
+                Link(destination: linkedInURL) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "link")
+                        Text("LinkedIn")
+                    }
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Theme.accentSoft))
+                    .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.45), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open \(person.firstName)'s LinkedIn")
+                .padding(.top, 1)
+            }
         }
         .padding(10)
         .frame(width: 190, alignment: .leading)
