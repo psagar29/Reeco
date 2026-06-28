@@ -6,7 +6,7 @@ embeddings against enrolled people, interprets voice commands into a structured
 filter, and drafts short openers.
 
 Everything is built to the frozen contract in [`../docs/API_CONTRACTS.md`](../docs/API_CONTRACTS.md)
-and the Person B spec in [`../docs/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md`](../docs/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md).
+and the Person B spec in [`../docs/planning/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md`](../docs/planning/workstreams/02_PERSON_B_BACKEND_MATCHING_CONVEX.md).
 
 > **Degrades gracefully with zero secrets.** With no API keys and no CV service,
 > the whole backend runs in a deterministic mock mode that returns the exact

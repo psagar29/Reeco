@@ -25,7 +25,7 @@ Build the Convex backend that stores people, calls the CV service, matches embed
 
 1. `docs/API_CONTRACTS.md`
 2. `demo-data/people.sample.json`
-3. Person A brief: `docs/workstreams/01_PERSON_A_CV_SERVICE_INSIGHTFACE.md`
+3. Person A brief: `docs/planning/workstreams/01_PERSON_A_CV_SERVICE_INSIGHTFACE.md`
 
 ## Required deliverables
 
