@@ -39,7 +39,7 @@ enum MissionParser {
                  roles: ["sponsor", "partnerships", "community", "devrel", "marketing"],
                  keywords: ["sponsorship", "partnership", "community", "brand", "budget"], action: .coldEmail),
         GoalRule(goalType: .hiring,
-                 match: ["hiring", "recruit", "looking to hire", "find engineers", "find talent", "build my team", "grow my team"],
+                 match: ["hiring", "hire ", "recruit", "looking to hire", "find engineers", "find talent", "build my team", "grow my team"],
                  roles: ["engineer", "designer", "candidate", "operator"],
                  keywords: ["hiring", "open to work", "candidate"], action: .linkedinDm),
         GoalRule(goalType: .customers,

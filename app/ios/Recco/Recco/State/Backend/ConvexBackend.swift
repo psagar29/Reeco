@@ -185,6 +185,52 @@ final class ConvexBackend: ReccoBackend {
         )
     }
 
+    // MARK: - Lazy GTM / Scout Mode
+
+    func runGTMScout(clientId: String, transcript: String, count: Int?) async throws -> GTMRunResultDTO {
+        guard hasBackend else { return try await fallback.runGTMScout(clientId: clientId, transcript: transcript, count: count) }
+        let body = GTMRunRequest(clientId: clientId, transcript: transcript, count: count)
+        return try await post("/api/gtm/run", body: body, as: GTMRunResultDTO.self, timeoutInterval: RequestTimeout.identity)
+    }
+
+    func listGTMRuns(clientId: String) async throws -> [GTMRunDTO] {
+        guard hasBackend else { return try await fallback.listGTMRuns(clientId: clientId) }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let enc = clientId.addingPercentEncoding(withAllowedCharacters: allowed) ?? clientId
+        return try await get("/api/gtm/runs?clientId=\(enc)", as: [GTMRunDTO].self)
+    }
+
+    func listGTMProspects(clientId: String, runId: String?) async throws -> [GTMProspectDTO] {
+        guard hasBackend else { return try await fallback.listGTMProspects(clientId: clientId, runId: runId) }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let enc = clientId.addingPercentEncoding(withAllowedCharacters: allowed) ?? clientId
+        var path = "/api/gtm/prospects?clientId=\(enc)"
+        if let runId, let r = runId.addingPercentEncoding(withAllowedCharacters: allowed) {
+            path += "&runId=\(r)"
+        }
+        return try await get(path, as: [GTMProspectDTO].self)
+    }
+
+    func generateGTMOutreach(id: String, eventName: String?, senderName: String?) async throws -> OutreachDraftDTO {
+        guard hasBackend else { return try await fallback.generateGTMOutreach(id: id, eventName: eventName, senderName: senderName) }
+        let body = GTMOutreachRequest(id: id, eventName: eventName, senderName: senderName)
+        return try await post("/api/gtm/prospects/outreach", body: body, as: OutreachDraftDTO.self, timeoutInterval: RequestTimeout.identity)
+    }
+
+    func updateGTMProspectStatus(
+        id: String,
+        status: GTMProspectStatus,
+        channel: FollowUpChannel?,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) async throws -> GTMProspectDTO? {
+        guard hasBackend else {
+            return try await fallback.updateGTMProspectStatus(id: id, status: status, channel: channel, editedOutreach: editedOutreach, sentAt: sentAt)
+        }
+        let body = GTMStatusRequest(id: id, status: status.rawValue, channel: channel?.rawValue, editedOutreach: editedOutreach, sentAt: sentAt)
+        return try await post("/api/gtm/prospects/status", body: body, as: NullableProspect.self).value
+    }
+
     // MARK: - HTTP helpers
 
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
@@ -347,6 +393,35 @@ final class ConvexBackend: ReccoBackend {
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
             value = container.decodeNil() ? nil : try container.decode(MissionProfileDTO.self)
+        }
+    }
+
+    private struct GTMRunRequest: Encodable {
+        let clientId: String
+        let transcript: String
+        let count: Int?
+    }
+
+    private struct GTMOutreachRequest: Encodable {
+        let id: String
+        let eventName: String?
+        let senderName: String?
+    }
+
+    private struct GTMStatusRequest: Encodable {
+        let id: String
+        let status: String
+        let channel: String?
+        let editedOutreach: OutreachDraftDTO?
+        let sentAt: Double?
+    }
+
+    /// Decodes a `GTMProspect | null` response.
+    private struct NullableProspect: Decodable {
+        let value: GTMProspectDTO?
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            value = container.decodeNil() ? nil : try container.decode(GTMProspectDTO.self)
         }
     }
 }

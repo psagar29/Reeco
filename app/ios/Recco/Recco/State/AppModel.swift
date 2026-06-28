@@ -794,6 +794,109 @@ final class AppModel {
         }
     }
 
+    // MARK: - Lazy GTM / Scout Mode
+
+    /// Past Scout runs (newest first).
+    private(set) var gtmRuns: [GTMRunDTO] = []
+    /// Prospects for the active run.
+    private(set) var gtmProspects: [GTMProspectDTO] = []
+    /// The run currently shown in the Scout view.
+    private(set) var activeGtmRun: GTMRunDTO?
+    /// True while a Scout search is in flight (drives the premium loading state).
+    private(set) var isRunningGTM = false
+    /// Phase line shown while searching ("Searching profiles…").
+    private(set) var gtmStatusMessage: String?
+    /// Non-fatal Scout error.
+    private(set) var gtmError: String?
+    /// Drives presentation of the Scout results view.
+    var showScout = false
+
+    func gtmProspect(id: String) -> GTMProspectDTO? { gtmProspects.first { $0.id == id } }
+
+    /// Run a voice/text GTM request → a scored set of AI-found prospects. Never
+    /// mixes into `scanMemories` (Scout prospects are not real people met).
+    func runGTMScout(transcript: String, count: Int? = nil) async {
+        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        isRunningGTM = true
+        gtmError = nil
+        gtmStatusMessage = "Understanding your request…"
+
+        // Premium phase ticker (cosmetic; the real work is the backend call).
+        let phases = ["Searching profiles…", "Ranking leads…", "Drafting outreach…"]
+        let ticker = Task { [weak self] in
+            for phase in phases {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self, self.isRunningGTM else { return }
+                self.gtmStatusMessage = phase
+            }
+        }
+
+        do {
+            let result = try await backend.runGTMScout(clientId: clientId, transcript: text, count: count)
+            activeGtmRun = result.run
+            gtmProspects = result.prospects
+            gtmRuns.insert(result.run, at: 0)
+            showScout = true
+        } catch {
+            gtmError = error.localizedDescription
+        }
+        ticker.cancel()
+        isRunningGTM = false
+        gtmStatusMessage = nil
+    }
+
+    func loadGTMRuns() async {
+        do { gtmRuns = try await backend.listGTMRuns(clientId: clientId) }
+        catch { gtmError = error.localizedDescription }
+    }
+
+    func loadGTMProspects(runId: String?) async {
+        do { gtmProspects = try await backend.listGTMProspects(clientId: clientId, runId: runId) }
+        catch { gtmError = error.localizedDescription }
+    }
+
+    func generateGTMOutreach(prospectId id: String) async {
+        do {
+            let draft = try await backend.generateGTMOutreach(
+                id: id, eventName: AppModel.eventName, senderName: AppModel.senderName
+            )
+            if let i = gtmProspects.firstIndex(where: { $0.id == id }) {
+                gtmProspects[i] = gtmProspects[i].replacingOutreach(draft)
+            }
+        } catch {
+            gtmError = "Couldn't draft outreach: \(error.localizedDescription)"
+        }
+    }
+
+    /// Fake "Sent" (and other status changes) for a Scout prospect. No real
+    /// message is ever sent — status only.
+    func updateGTMProspectStatus(
+        id: String,
+        status: GTMProspectStatus,
+        channel: FollowUpChannel? = nil,
+        editedOutreach: OutreachDraftDTO? = nil
+    ) async {
+        let sentAt: Double? = status == .sent ? now() : gtmProspect(id: id)?.sentAt
+        if let i = gtmProspects.firstIndex(where: { $0.id == id }) {
+            gtmProspects[i] = gtmProspects[i].replacingStatus(
+                status: status,
+                channel: channel ?? gtmProspects[i].selectedChannel,
+                outreach: editedOutreach,
+                sentAt: sentAt
+            )
+        }
+        do {
+            if let updated = try await backend.updateGTMProspectStatus(
+                id: id, status: status, channel: channel, editedOutreach: editedOutreach, sentAt: sentAt
+            ), let i = gtmProspects.firstIndex(where: { $0.id == updated.id }) {
+                gtmProspects[i] = updated
+            }
+        } catch {
+            gtmError = "Couldn't update prospect: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Helpers
 
     private func now() -> Double { Date().timeIntervalSince1970 * 1000 }

@@ -74,6 +74,31 @@ protocol ReccoBackend: Sendable {
         senderName: String?,
         mission: MissionProfileDTO?
     ) async throws -> OutreachDraftDTO
+
+    // MARK: - Lazy GTM / Scout Mode
+
+    /// Parse a voice/text GTM request, find ~`count` prospects (Fiber, mock
+    /// fallback), score + draft them, and persist a run (`POST /api/gtm/run`).
+    func runGTMScout(clientId: String, transcript: String, count: Int?) async throws -> GTMRunResultDTO
+
+    /// Past Scout runs, newest first (`GET /api/gtm/runs?clientId=…`).
+    func listGTMRuns(clientId: String) async throws -> [GTMRunDTO]
+
+    /// Prospects for a run (or all for a client) (`GET /api/gtm/prospects?…`).
+    func listGTMProspects(clientId: String, runId: String?) async throws -> [GTMProspectDTO]
+
+    /// Regenerate outreach for a prospect (`POST /api/gtm/prospects/outreach`).
+    func generateGTMOutreach(id: String, eventName: String?, senderName: String?) async throws -> OutreachDraftDTO
+
+    /// Update a prospect's channel/status/edited outreach/sentAt — drives the
+    /// fake "Sent" (`POST /api/gtm/prospects/status`).
+    func updateGTMProspectStatus(
+        id: String,
+        status: GTMProspectStatus,
+        channel: FollowUpChannel?,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) async throws -> GTMProspectDTO?
 }
 
 enum BackendError: LocalizedError {

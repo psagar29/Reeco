@@ -12,6 +12,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @State private var showBrain = false
     @State private var showDemoPicker = false
+    @State private var showScoutPanel = false
     /// The dock's top edge in global (full-screen) coordinates; fed to CameraView
     /// so it can keep AR content above the dock. 0 until first measured.
     @State private var dockTopGlobalY: CGFloat = 0
@@ -26,6 +27,13 @@ struct RootView: View {
             // Chrome — stays inside the safe area.
             VStack(spacing: 0) {
                 TopBar(showBrain: $showBrain, showDemoPicker: $showDemoPicker)
+                // Minimal floating "Scout" button under the top chrome (won't
+                // overlap the bar or the centered AR target brackets).
+                HStack {
+                    LazyGTMButtonView { showScoutPanel = true }
+                    Spacer()
+                }
+                .padding(.top, 8)
                 Spacer(minLength: 0)
                 CommandDockView()
                     .background(
@@ -47,8 +55,17 @@ struct RootView: View {
                     .transition(.opacity)
                     .zIndex(10)
             }
+
+            // Lazy GTM / Scout voice panel, over the blurred live app.
+            if showScoutPanel {
+                LazyGTMVoicePanelView(isPresented: $showScoutPanel)
+                    .environment(appModel)
+                    .transition(.opacity)
+                    .zIndex(11)
+            }
         }
         .animation(.easeInOut(duration: 0.3), value: appModel.hasCompletedMissionSetup)
+        .animation(.easeInOut(duration: 0.25), value: showScoutPanel)
         .background(Theme.bg)
         .onPreferenceChange(DockTopKey.self) { top in
             if top.isFinite, top > 1 { dockTopGlobalY = top }
@@ -68,6 +85,17 @@ struct RootView: View {
         .fullScreenCover(isPresented: $showBrain) {
             BrainView(isPresented: $showBrain)
                 .environment(appModel)
+        }
+        // Scout results (Lazy GTM).
+        .fullScreenCover(isPresented: Binding(
+            get: { appModel.showScout },
+            set: { appModel.showScout = $0 }
+        )) {
+            GTMScoutView(isPresented: Binding(
+                get: { appModel.showScout },
+                set: { appModel.showScout = $0 }
+            ))
+            .environment(appModel)
         }
         // Demo mode picker.
         .sheet(isPresented: $showDemoPicker) {

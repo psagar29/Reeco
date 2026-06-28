@@ -172,6 +172,104 @@ final class MockBackend: ReccoBackend {
         try? await Task.sleep(for: latency)
         return memoryStore.generateOutreach(id: id, eventName: eventName, senderName: senderName, mission: mission)
     }
+
+    // MARK: - Lazy GTM / Scout Mode (offline)
+
+    private let gtmStore = GTMStore()
+
+    func runGTMScout(clientId: String, transcript: String, count: Int?) async throws -> GTMRunResultDTO {
+        // Feel like a real search (parse → rank → draft).
+        try? await Task.sleep(for: .milliseconds(950))
+        let now = Date().timeIntervalSince1970 * 1000
+        let intent = GTMScout.parseIntent(transcript, count: count)
+        let runId = "gtmrun_\(UUID().uuidString.prefix(8).lowercased())"
+        let prospects = GTMScout.mockProspects(intent: intent, runId: runId, clientId: clientId, now: now)
+        let run = GTMRunDTO(
+            id: runId, clientId: clientId, rawText: transcript, parsedIntent: intent,
+            goalType: intent.goalType, query: intent.searchQuery, count: intent.count,
+            status: "ready", errorMessage: nil, createdAt: now, updatedAt: now
+        )
+        gtmStore.add(run: run, prospects: prospects)
+        return GTMRunResultDTO(run: run, prospects: prospects)
+    }
+
+    func listGTMRuns(clientId: String) async throws -> [GTMRunDTO] {
+        gtmStore.runs(clientId: clientId)
+    }
+
+    func listGTMProspects(clientId: String, runId: String?) async throws -> [GTMProspectDTO] {
+        gtmStore.prospects(clientId: clientId, runId: runId)
+    }
+
+    func generateGTMOutreach(id: String, eventName: String?, senderName: String?) async throws -> OutreachDraftDTO {
+        try? await Task.sleep(for: latency)
+        return gtmStore.regenerateOutreach(id: id)
+    }
+
+    func updateGTMProspectStatus(
+        id: String,
+        status: GTMProspectStatus,
+        channel: FollowUpChannel?,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) async throws -> GTMProspectDTO? {
+        try? await Task.sleep(for: .milliseconds(120))
+        return gtmStore.updateStatus(id: id, status: status, channel: channel, editedOutreach: editedOutreach, sentAt: sentAt)
+    }
+}
+
+/// Thread-safe in-memory Scout store for the offline backend.
+private final class GTMStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var runs: [GTMRunDTO] = []
+    private var prospects: [GTMProspectDTO] = []
+
+    func add(run: GTMRunDTO, prospects: [GTMProspectDTO]) {
+        lock.lock(); defer { lock.unlock() }
+        runs.insert(run, at: 0)
+        self.prospects.insert(contentsOf: prospects, at: 0)
+    }
+
+    func runs(clientId: String) -> [GTMRunDTO] {
+        lock.lock(); defer { lock.unlock() }
+        return runs.filter { $0.clientId == clientId }.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func prospects(clientId: String, runId: String?) -> [GTMProspectDTO] {
+        lock.lock(); defer { lock.unlock() }
+        return prospects
+            .filter { $0.clientId == clientId && (runId == nil || $0.runId == runId) }
+            .sorted { $0.matchScore > $1.matchScore }
+    }
+
+    private func goal(forRun runId: String) -> String {
+        runs.first { $0.id == runId }?.goalType ?? "other"
+    }
+
+    func regenerateOutreach(id: String) -> OutreachDraftDTO {
+        lock.lock(); defer { lock.unlock() }
+        guard let i = prospects.firstIndex(where: { $0.id == id }) else {
+            return MockOutreach.draft(name: "there", role: nil, company: nil, headline: nil, goalType: "other")
+        }
+        let p = prospects[i]
+        let draft = MockOutreach.draft(name: p.name, role: p.role, company: p.company, headline: p.headline, goalType: goal(forRun: p.runId))
+        prospects[i] = p.replacingOutreach(draft)
+        return draft
+    }
+
+    func updateStatus(
+        id: String,
+        status: GTMProspectStatus,
+        channel: FollowUpChannel?,
+        editedOutreach: OutreachDraftDTO?,
+        sentAt: Double?
+    ) -> GTMProspectDTO? {
+        lock.lock(); defer { lock.unlock() }
+        guard let i = prospects.firstIndex(where: { $0.id == id }) else { return nil }
+        let resolvedSentAt = status == .sent ? (sentAt ?? Date().timeIntervalSince1970 * 1000) : (sentAt ?? prospects[i].sentAt)
+        prospects[i] = prospects[i].replacingStatus(status: status, channel: channel, outreach: editedOutreach, sentAt: resolvedSentAt)
+        return prospects[i]
+    }
 }
 
 /// Thread-safe in-memory Brain store for the offline (`mockAll`) backend. Seeded
