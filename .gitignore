@@ -1,2 +1,44 @@
-# Generated enrollment embeddings (regenerate with: cd backend && npm run enroll)
+# ─── Recco monorepo ───────────────────────────────────────────────────────
+
+# Generated face-enrollment embeddings (regenerate: cd backend && npm run enroll)
 demo-data/embeddings.generated.json
+demo-data/enrollment/
+
+# ─── macOS ────────────────────────────────────────────────────────────────
+.DS_Store
+*.swp
+
+# ─── iOS / Xcode (app/) ──────────────────────────────────────────────────
+**/xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+**/DerivedData/
+build/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+**/.swiftpm/
+.build/
+
+# ─── Node / Convex (backend/) ────────────────────────────────────────────
+node_modules/
+backend/.env.local
+backend/.convex/
+npm-debug.log*
+yarn-error.log*
+
+# ─── Python (cv-service/) ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ─── Editors / tooling ───────────────────────────────────────────────────
+.idea/
+.vscode/
+*.log

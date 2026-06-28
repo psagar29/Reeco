@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (typecheck + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test
+
+  cv-service:
+    name: CV service (compile check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cv-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Full InsightFace + model download is too heavy for CI; a compile check
+      # catches syntax/import-structure regressions cheaply. Run the live
+      # /embed test locally (see cv-service/README.md).
+      - run: python -m py_compile main.py test_embed.py
+
+  ios:
+    name: iOS (build)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          xcodebuild \
+            -project app/ios/Recco/Recco.xcodeproj \
+            -scheme Recco \
+            -destination 'generic/platform=iOS Simulator' \
+            build CODE_SIGNING_ALLOWED=NO
