@@ -54,8 +54,9 @@ Stateless face → embedding. `POST /embed` accepts a JPEG/PNG (base64 or
 multipart) and returns a **512-dimensional, L2-normalized ArcFace embedding** for
 the largest face, plus quality metadata. `GET /health` reports model readiness.
 
-Default model is `buffalo_s` (MobileFaceNet recognition) for ~90 ms warm CPU
-latency; set `RECCO_CV_MODEL=buffalo_l` for the higher-accuracy ResNet50 net.
+Default model is `buffalo_s` (MobileFaceNet recognition) for ~380 ms warm CPU
+latency; set `RECCO_CV_MODEL=buffalo_l` for the higher-accuracy ResNet50 net
+(~1.7 s warm). Enrollment and live matching must use the same model.
 
 > **Important:** enrollment and live matching must use the **same** model —
 > embeddings from `buffalo_s` and `buffalo_l` are not comparable.

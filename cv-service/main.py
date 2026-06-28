@@ -36,9 +36,8 @@ from PIL import Image
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Model pack. buffalo_l is the default; set RECCO_CV_MODEL=buffalo_s for a
-# Default is buffalo_s: it emits the same 512-d ArcFace embedding as buffalo_l
-# but uses a MobileFaceNet recognition net that is ~4x faster on CPU
+# Model pack. Default is buffalo_s: it emits the same 512-d ArcFace embedding as
+# buffalo_l but uses a MobileFaceNet recognition net that is ~4x faster on CPU
 # (~380ms warm vs ~1.7s for buffalo_l on a 16-core machine), which is what
 # keeps us under the 800ms demo target. Set RECCO_CV_MODEL=buffalo_l for the
 # highest-accuracy ResNet50 recognition net. IMPORTANT: enrollment and live
@@ -288,7 +287,10 @@ def _embed_from_bytes(image_bytes: bytes, request_id: Optional[str]):
                 "faceDetected": False,
                 "embedding": None,
                 "quality": _quality(False, crop_w, crop_h, det_score),
-                "error": "No usable face detected",
+                "error": (
+                    f"No usable face detected: best detection score "
+                    f"{det_score:.2f} is below the minimum {MIN_DET_SCORE:.2f}"
+                ),
             },
             200,
         )
@@ -377,6 +379,8 @@ def health() -> dict:
         "ok": True,
         "model": MODEL_NAME,
         "ready": bool(_model_ready),
+        "detSize": DET_SIZE,
+        "minDetScore": MIN_DET_SCORE,
     }
     if not _model_ready and _load_error:
         body["error"] = _load_error

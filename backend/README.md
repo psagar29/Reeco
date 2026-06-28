@@ -341,6 +341,10 @@ It then writes `demo-data/embeddings.generated.json` (a `personId → number[512
 map; git-ignored). The demo enrollment images are not in the repo, so by default
 enrollment produces mock embeddings — which still match end-to-end.
 
+For the full enrollment workflow (capturing photos, running the CV service,
+seeding, privacy checks, and troubleshooting) see
+[`../docs/FACE_ENROLLMENT.md`](../docs/FACE_ENROLLMENT.md).
+
 ---
 
 ## Verifying without the iOS app

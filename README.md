@@ -104,7 +104,8 @@ All four components are individually built and verified:
 
 - ✅ **iOS** — builds + runs in mock mode (camera, Brain, voice/chips, profiles, drafts)
 - ✅ **Backend** — 49 unit tests passing; all contract functions implemented
-- ✅ **CV service** — live-tested: 512-d L2-normalized embeddings, ~90 ms warm
+- ✅ **CV service** — live-tested: 512-d L2-normalized embeddings, ~380 ms warm
+  on CPU (default `buffalo_s`)
 - 🔌 **Integration** — wiring the iOS `live` mode to Convex, deploying + seeding the
   backend, real face enrollment, and on-device threshold tuning are the remaining work
 
