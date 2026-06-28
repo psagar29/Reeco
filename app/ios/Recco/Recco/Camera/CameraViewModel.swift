@@ -70,6 +70,7 @@ final class CameraViewModel {
     private(set) var targetTrackId: String?
 
     private var latestPixelBuffer: CVPixelBuffer?
+    private var lastFrameReceivedAt: TimeInterval?
     private var lastProcessTime: TimeInterval = 0
     private let minFrameInterval: TimeInterval = 0.08   // ~12 fps detection
     private var simTask: Task<Void, Never>?
@@ -119,7 +120,9 @@ final class CameraViewModel {
 
     func onDisappear() {
         simTask?.cancel()
+        simTask = nil
         stageTask?.cancel()
+        stageTask = nil
         session.stop()
         appModel.identityCaptureHandler = nil
     }
@@ -130,6 +133,11 @@ final class CameraViewModel {
     }
 
     private func startCamera() {
+        simTask?.cancel()
+        simTask = nil
+        usingSimulatedSource = false
+        lastFrameReceivedAt = nil
+        statusLine = nil
         session.onFrame = { [weak self] frame in
             // Delivered on the capture queue; hop to the main actor.
             Task { @MainActor in self?.handle(frame: frame) }
@@ -140,11 +148,25 @@ final class CameraViewModel {
             try? await Task.sleep(for: .milliseconds(600))
             if !session.isCameraAvailable { startSimulated() }
         }
+        // Some devices can create a camera session but fail to deliver frames
+        // (CoreDevice/Fig capture errors, stale permission daemon, continuity
+        // camera weirdness). Never let that strand the UI on a black preview.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1400))
+            if lastFrameReceivedAt == nil {
+                statusLine = "Camera feed unavailable — showing demo lens."
+                appModel.setStatus("Camera feed unavailable — showing demo lens.")
+                startSimulated()
+            }
+        }
     }
 
     private func startSimulated() {
         guard simTask == nil else { return }
+        session.stop()
         usingSimulatedSource = true
+        previewImageAspect = nil
+        latestPixelBuffer = nil
         // Live recognition needs real pixels; the simulated source has none, so
         // be explicit rather than silently showing no overlays in live mode.
         if appModel.demoMode == .live {
@@ -161,6 +183,14 @@ final class CameraViewModel {
     // MARK: - Frame processing (device)
 
     private func handle(frame: CameraFrame) {
+        if usingSimulatedSource {
+            simTask?.cancel()
+            simTask = nil
+            usingSimulatedSource = false
+            statusLine = nil
+            appModel.setStatus(nil)
+        }
+        lastFrameReceivedAt = nowSeconds()
         let now = nowSeconds()
         guard now - lastProcessTime >= minFrameInterval else { return }
         lastProcessTime = now
