@@ -8,11 +8,16 @@ Point the camera at someone, say what you want, and Recco locks the target,
 reads context from the scene, looks up identity data, saves the scan to a Brain
 graph, and drafts the follow-up.
 
-[Architecture](docs/ARCHITECTURE.md) · [API Contracts](docs/API_CONTRACTS.md) · [Demo Runbook](docs/DEMO_RUNBOOK.md) · [QA Checklist](docs/QA_CHECKLIST.md)
+[Watch Demo](https://www.youtube.com/watch?v=513qRmC00Q0) · [Architecture](docs/ARCHITECTURE.md) · [API Contracts](docs/API_CONTRACTS.md) · [Demo Runbook](docs/DEMO_RUNBOOK.md) · [QA Checklist](docs/QA_CHECKLIST.md)
 
 </div>
 
 ---
+
+## Demo Video
+
+Watch the Recco demo on YouTube:
+[https://www.youtube.com/watch?v=513qRmC00Q0](https://www.youtube.com/watch?v=513qRmC00Q0)
 
 ## Demo Story
 
