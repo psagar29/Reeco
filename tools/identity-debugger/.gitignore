@@ -1,0 +1,7 @@
+# Never commit teammate test photos / badge images used with the debugger.
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.webp
+sample-images/

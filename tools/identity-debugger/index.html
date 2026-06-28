@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Recco · Identity Debugger</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c232d;
+    --border: #2a323d;
+    --text: #d7dee7;
+    --muted: #8b97a7;
+    --accent: #4c9aff;
+    --good: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 18px 20px 80px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--muted); margin: 0 0 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=url], textarea, select {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
+    font: inherit;
+  }
+  input[type=range] { width: 100%; }
+  textarea { resize: vertical; min-height: 44px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1; min-width: 0; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 7px;
+    padding: 9px 14px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  .btnrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .drop {
+    border: 1.5px dashed var(--border); border-radius: 8px; padding: 14px;
+    text-align: center; color: var(--muted); cursor: pointer; transition: .15s;
+    background: var(--panel-2);
+  }
+  .drop.dragover { border-color: var(--accent); color: var(--text); }
+  .preview { margin-top: 10px; }
+  .preview img { max-width: 100%; max-height: 220px; border-radius: 7px; border: 1px solid var(--border); display: block; }
+  .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; word-break: break-all; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .03em; }
+  .pill.verified { background: rgba(63,185,80,.15); color: var(--good); }
+  .pill.possible { background: rgba(210,153,34,.15); color: var(--warn); }
+  .pill.not_found, .pill.needs_clarification { background: rgba(139,151,167,.15); color: var(--muted); }
+  .pill.error { background: rgba(248,81,73,.15); color: var(--bad); }
+  .pill.ok { background: rgba(63,185,80,.15); color: var(--good); }
+  .pill.fail { background: rgba(248,81,73,.15); color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td.num { font-family: var(--mono); }
+  td a { color: var(--accent); word-break: break-all; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-family: var(--mono); word-break: break-word; }
+  pre {
+    background: #0a0d12; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; overflow: auto; max-height: 420px; font-family: var(--mono);
+    font-size: 12px; color: #c8d3e0;
+  }
+  .diag { border-left: 3px solid var(--accent); padding: 10px 12px; border-radius: 0 7px 7px 0;
+    background: var(--panel-2); margin-top: 8px; }
+  .diag.good { border-color: var(--good); }
+  .diag.warn { border-color: var(--warn); }
+  .diag.bad  { border-color: var(--bad); }
+  .diag .title { font-weight: 700; margin-bottom: 2px; }
+  .muted { color: var(--muted); }
+  .checkrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .checkrow input { width: auto; flex: 0; }
+  .checkrow label { margin: 0; color: var(--text); }
+  .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid rgba(255,255,255,.3);
+    border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  small.hint { color: var(--muted); font-size: 11px; }
+  .thresh { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Recco · Identity Debugger</h1>
+  <span class="sub">face + badge → Convex /identity/resolve → OpenAI Vision → Fiber → EC2 CV verify</span>
+</header>
+
+<div class="wrap">
+
+  <!-- ============ CONFIG ============ -->
+  <div class="card">
+    <h2>Configuration</h2>
+    <div class="grid">
+      <div>
+        <label>Convex base URL</label>
+        <input type="url" id="convexBase" value="https://fabulous-hyena-861.convex.site" />
+        <label>Track ID</label>
+        <div class="row">
+          <input type="text" id="trackId" />
+          <button class="secondary" style="flex:0 0 auto" id="regenTrack" title="Regenerate">↻</button>
+        </div>
+        <label>Transcript / name hint</label>
+        <textarea id="transcript">find info on him</textarea>
+        <small class="hint">If OCR fails, try: <code>find info on [Full Name]</code></small>
+      </div>
+      <div>
+        <label>CV service base URL (EC2)</label>
+        <input type="url" id="cvBase" value="http://18.118.12.102:8000" />
+        <label>Image MIME type</label>
+        <select id="mimeType">
+          <option value="image/jpeg" selected>image/jpeg</option>
+          <option value="image/png">image/png</option>
+        </select>
+        <label>Max image dimension (px): <span id="maxDimVal" class="thresh">1024</span></label>
+        <input type="range" id="maxDim" min="256" max="2048" step="64" value="1024" />
+        <label>JPEG quality: <span id="qualVal" class="thresh">0.82</span></label>
+        <input type="range" id="quality" min="0.3" max="0.95" step="0.01" value="0.82" />
+      </div>
+    </div>
+    <div class="btnrow">
+      <button class="secondary" id="btnHealth">GET /api/health</button>
+      <button class="secondary" id="btnPeople">GET /api/people</button>
+      <button class="secondary" id="btnCvHealth">GET CV /health</button>
+    </div>
+    <div id="quickOut" style="margin-top:12px"></div>
+  </div>
+
+  <!-- ============ IMAGES ============ -->
+  <div class="card">
+    <h2>Images</h2>
+    <div class="checkrow">
+      <input type="checkbox" id="sameImage" />
+      <label for="sameImage">Use one image for both face &amp; context</label>
+    </div>
+    <div class="grid" style="margin-top:10px">
+      <div>
+        <label>Face image (tight frontal crop — used for CV verification)</label>
+        <div class="drop" id="faceDrop">Click or drop a face image</div>
+        <input type="file" id="faceFile" accept="image/*" hidden />
+        <div class="preview" id="facePreview"></div>
+      </div>
+      <div>
+        <label>Context / badge image (wider crop — used for OCR)</label>
+        <div class="drop" id="ctxDrop">Click or drop a badge / context image</div>
+        <input type="file" id="ctxFile" accept="image/*" hidden />
+        <div class="preview" id="ctxPreview"></div>
+      </div>
+    </div>
+    <div class="btnrow">
+      <button id="btnResolve" disabled>POST /api/identity/resolve</button>
+    </div>
+    <small class="hint">Images are compressed to JPEG base64 in-browser before sending. The data-URL prefix is stripped automatically.</small>
+  </div>
+
+  <!-- ============ RESULT ============ -->
+  <div class="card" id="resultCard" style="display:none">
+    <h2>Identity Result <span id="latency" class="muted" style="text-transform:none;letter-spacing:0"></span></h2>
+    <div id="statusLine" style="margin-bottom:10px"></div>
+    <div id="diagnosis"></div>
+
+    <div class="grid" style="margin-top:14px">
+      <div>
+        <h2 style="margin-bottom:8px">Clue (OCR)</h2>
+        <div id="clueOut" class="kv"></div>
+      </div>
+      <div>
+        <h2 style="margin-bottom:8px">Verification (best candidate)</h2>
+        <div id="verifyOut" class="kv"></div>
+      </div>
+    </div>
+
+    <h2 style="margin:16px 0 8px">Candidates</h2>
+    <div id="candidatesOut"></div>
+
+    <h2 style="margin:16px 0 8px">Raw response</h2>
+    <pre id="rawOut"></pre>
+  </div>
+
+  <!-- ============ DIRECT CV TEST ============ -->
+  <div class="card">
+    <h2>Direct CV test (POST /embed) — is the face crop usable?</h2>
+    <p class="muted" style="margin-top:0;font-size:12px">
+      Sends one image straight to the EC2 CV service, bypassing Convex. Tells you whether the
+      crop itself yields a detectable face + embedding. <strong>Note:</strong> the browser can only
+      reach the CV service directly if that service sends CORS headers — see the README. The main
+      Convex flow above is unaffected (Convex calls the CV service server-side).
+    </p>
+    <div class="grid">
+      <div>
+        <div class="drop" id="cvDrop">Click or drop an image for the CV service</div>
+        <input type="file" id="cvFile" accept="image/*" hidden />
+        <div class="preview" id="cvPreview"></div>
+        <div class="btnrow">
+          <button id="btnEmbed" disabled>POST /embed</button>
+        </div>
+      </div>
+      <div>
+        <div id="cvOut" class="kv"></div>
+        <pre id="cvRaw" style="display:none;margin-top:10px"></pre>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ---------- tiny DOM helpers ----------
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function setHTML(el, html) { el.innerHTML = html; }
+function fmtBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(2) + " MB";
+}
+// Approx decoded byte size of a base64 string.
+function base64Bytes(b64) { return Math.floor(b64.length * 3 / 4); }
+
+// ---------- track id ----------
+function genTrackId() {
+  const r = Math.random().toString(36).slice(2, 7);
+  return `dbg_${Date.now()}_${r}`;
+}
+$("trackId").value = genTrackId();
+$("regenTrack").onclick = () => ($("trackId").value = genTrackId());
+
+// ---------- sliders ----------
+$("maxDim").oninput = (e) => ($("maxDimVal").textContent = e.target.value);
+$("quality").oninput = (e) => ($("qualVal").textContent = Number(e.target.value).toFixed(2));
+
+// ---------- image processing ----------
+// Holds processed images: { dataUrl, base64, width, height, origW, origH, bytes }
+const images = { face: null, ctx: null, cv: null };
+
+function loadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("read failed"));
+    fr.onload = () => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("decode failed"));
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+// Resize/compress to JPEG dataURL respecting maxDim + quality.
+function compress(img) {
+  const maxDim = Number($("maxDim").value);
+  const quality = Number($("quality").value);
+  const origW = img.naturalWidth, origH = img.naturalHeight;
+  let w = origW, h = origH;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  w = Math.max(1, Math.round(w * scale));
+  h = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  const cx = canvas.getContext("2d");
+  cx.fillStyle = "#fff"; // flatten any alpha so JPEG is clean
+  cx.fillRect(0, 0, w, h);
+  cx.drawImage(img, 0, 0, w, h);
+  const dataUrl = canvas.toDataURL("image/jpeg", quality);
+  const base64 = dataUrl.split(",")[1] || "";
+  return { dataUrl, base64, width: w, height: h, origW, origH, bytes: base64Bytes(base64) };
+}
+
+async function handleFile(file, slot, previewEl) {
+  try {
+    const img = await loadImageFile(file);
+    const processed = compress(img);
+    images[slot] = processed;
+    setHTML(previewEl,
+      `<img src="${processed.dataUrl}" alt="preview" />
+       <div class="meta">${processed.origW}×${processed.origH} → ${processed.width}×${processed.height} ·
+       payload ${fmtBytes(processed.bytes)} (base64 ${processed.base64.length.toLocaleString()} chars)</div>`);
+    // mirror to context when "same image" is on
+    if (slot === "face" && $("sameImage").checked) {
+      images.ctx = processed;
+      renderMirrored();
+    }
+    refreshButtons();
+  } catch (err) {
+    setHTML(previewEl, `<div class="diag bad">Could not load image: ${esc(err.message)}</div>`);
+  }
+}
+
+function renderMirrored() {
+  const p = images.ctx;
+  if (!p) return;
+  setHTML($("ctxPreview"),
+    `<img src="${p.dataUrl}" alt="preview" />
+     <div class="meta">mirrored from face · ${p.width}×${p.height} · ${fmtBytes(p.bytes)}</div>`);
+}
+
+function wireDrop(dropId, fileId, slot, previewId) {
+  const drop = $(dropId), file = $(fileId), preview = $(previewId);
+  drop.onclick = () => file.click();
+  file.onchange = () => file.files[0] && handleFile(file.files[0], slot, preview);
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("dragover"); };
+  drop.ondragleave = () => drop.classList.remove("dragover");
+  drop.ondrop = (e) => {
+    e.preventDefault(); drop.classList.remove("dragover");
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f, slot, preview);
+  };
+}
+wireDrop("faceDrop", "faceFile", "face", "facePreview");
+wireDrop("ctxDrop", "ctxFile", "ctx", "ctxPreview");
+wireDrop("cvDrop", "cvFile", "cv", "cvPreview");
+
+$("sameImage").onchange = (e) => {
+  const ctxDrop = $("ctxDrop");
+  if (e.target.checked) {
+    ctxDrop.style.opacity = ".5"; ctxDrop.style.pointerEvents = "none";
+    if (images.face) { images.ctx = images.face; renderMirrored(); }
+  } else {
+    ctxDrop.style.opacity = ""; ctxDrop.style.pointerEvents = "";
+    images.ctx = null; setHTML($("ctxPreview"), "");
+  }
+  refreshButtons();
+};
+
+function refreshButtons() {
+  $("btnResolve").disabled = !(images.face && images.ctx);
+  $("btnEmbed").disabled = !images.cv;
+}
+
+// ---------- networking ----------
+function convexUrl(path) {
+  return $("convexBase").value.replace(/\/+$/, "") + path;
+}
+function cvUrl(path) {
+  return $("cvBase").value.replace(/\/+$/, "") + path;
+}
+
+async function getJSON(url) {
+  const res = await fetch(url, { method: "GET" });
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch { json = text; }
+  return { ok: res.ok, status: res.status, json };
+}
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch { json = text; }
+  return { ok: res.ok, status: res.status, json };
+}
+
+function busy(btn, on, label) {
+  if (on) { btn.dataset.label = btn.textContent; btn.disabled = true;
+    setHTML(btn, `<span class="spinner"></span> ${label || "…"}`); }
+  else { btn.disabled = false; btn.textContent = btn.dataset.label; refreshButtons(); }
+}
+
+// ---------- quick endpoints ----------
+$("btnHealth").onclick = () => quick($("btnHealth"), () => getJSON(convexUrl("/api/health")), "Convex /api/health");
+$("btnCvHealth").onclick = () => quick($("btnCvHealth"), () => getJSON(cvUrl("/health")), "CV /health");
+$("btnPeople").onclick = () => quick($("btnPeople"), async () => {
+  const r = await getJSON(convexUrl("/api/people"));
+  if (Array.isArray(r.json)) r.summary = `${r.json.length} people`;
+  return r;
+}, "Convex /api/people");
+
+async function quick(btn, fn, label) {
+  busy(btn, true, "…");
+  const out = $("quickOut");
+  try {
+    const r = await fn();
+    const pill = r.ok ? `<span class="pill ok">${r.status} OK</span>` : `<span class="pill fail">${r.status}</span>`;
+    setHTML(out, `<div class="diag ${r.ok ? "good" : "bad"}"><div class="title">${esc(label)} ${pill}
+      ${r.summary ? `· ${esc(r.summary)}` : ""}</div>
+      <pre style="max-height:240px;margin-top:8px">${esc(JSON.stringify(r.json, null, 2))}</pre></div>`);
+  } catch (err) {
+    setHTML(out, `<div class="diag bad"><div class="title">${esc(label)} — request failed</div>
+      <div class="muted">${esc(err.message)}. If this is the CV service, it is likely a CORS/mixed-content
+      block from the browser; the Convex flow is unaffected (CV runs server-side there).</div></div>`);
+  } finally { busy(btn, false); }
+}
+
+// ---------- identity resolve ----------
+$("btnResolve").onclick = async () => {
+  const btn = $("btnResolve");
+  busy(btn, true, "resolving…");
+  const body = {
+    trackId: $("trackId").value || genTrackId(),
+    transcript: $("transcript").value || null,
+    faceImageBase64: images.face.base64,
+    contextImageBase64: images.ctx.base64,
+    imageMimeType: $("mimeType").value,
+  };
+  try {
+    const r = await postJSON(convexUrl("/api/identity/resolve"), body);
+    renderResult(r.json, r.status, r.ok);
+  } catch (err) {
+    $("resultCard").style.display = "";
+    setHTML($("statusLine"), `<span class="pill error">request failed</span>`);
+    setHTML($("diagnosis"), `<div class="diag bad"><div class="title">Request failed</div>
+      <div>${esc(err.message)}</div></div>`);
+    setHTML($("rawOut"), esc(err.stack || err.message));
+  } finally { busy(btn, false); $("trackId").value = genTrackId(); }
+};
+
+function kv(pairs) {
+  return pairs.map(([k, v]) =>
+    `<div class="k">${esc(k)}</div><div class="v">${v === null || v === undefined || v === ""
+      ? '<span class="muted">—</span>' : esc(v)}</div>`).join("");
+}
+
+function renderResult(data, httpStatus, httpOk) {
+  $("resultCard").style.display = "";
+  if (!httpOk || typeof data !== "object" || data === null) {
+    setHTML($("statusLine"), `<span class="pill error">HTTP ${httpStatus}</span>`);
+    setHTML($("diagnosis"), `<div class="diag bad"><div class="title">Backend error</div>
+      <div>${esc(typeof data === "object" ? JSON.stringify(data) : data)}</div></div>`);
+    setHTML($("rawOut"), esc(JSON.stringify(data, null, 2)));
+    $("clueOut").innerHTML = $("verifyOut").innerHTML = ""; $("candidatesOut").innerHTML = "";
+    return;
+  }
+
+  const status = data.status || "error";
+  $("latency").textContent = data.latencyMs != null ? `· ${data.latencyMs} ms` : "";
+  setHTML($("statusLine"),
+    `<span class="pill ${status}">${esc(status)}</span>
+     <span style="margin-left:10px">${esc(data.message || "")}</span>`);
+
+  // clue
+  const c = data.clue || {};
+  setHTML($("clueOut"), kv([
+    ["fullName", c.fullName], ["company", c.company], ["role", c.role],
+    ["school", c.school], ["confidence", c.confidence != null ? Number(c.confidence).toFixed(2) : null],
+    ["evidence", c.evidence], ["rawText", c.rawText],
+  ]));
+
+  // verification
+  const v = data.verification;
+  if (v) {
+    setHTML($("verifyOut"), kv([
+      ["candidateId", v.candidateId],
+      ["verified", String(v.verified)],
+      ["score", v.score != null ? Number(v.score).toFixed(4) : null],
+      ["threshold", v.threshold],
+      ["faceDetected", String(v.faceDetected)],
+      ["message", v.message],
+    ]));
+  } else {
+    setHTML($("verifyOut"), `<div class="empty" style="grid-column:1/3">verification is null — no face verification ran</div>`);
+  }
+
+  // candidates table
+  const cands = Array.isArray(data.candidates) ? data.candidates : [];
+  if (cands.length === 0) {
+    setHTML($("candidatesOut"), `<div class="empty">No candidates returned.</div>`);
+  } else {
+    const rows = cands.map((x) => `<tr>
+      <td>${esc(x.fullName)}${data.bestCandidate && data.bestCandidate.candidateId === x.candidateId ? ' <span class="pill ok" style="font-size:9px">best</span>' : ""}</td>
+      <td>${esc(x.company || "")}</td>
+      <td>${esc(x.role || "")}</td>
+      <td>${esc(x.school || "")}</td>
+      <td>${x.linkedinUrl ? `<a href="${esc(x.linkedinUrl)}" target="_blank" rel="noopener">link</a>` : '<span class="muted">—</span>'}</td>
+      <td>${esc(x.email || "")}</td>
+      <td>${x.profilePhotoUrl ? `<a href="${esc(x.profilePhotoUrl)}" target="_blank" rel="noopener">photo</a>` : '<span class="pill fail" style="font-size:9px">none</span>'}</td>
+      <td class="num">${x.matchScore != null ? Number(x.matchScore).toFixed(3) : "—"}</td>
+      <td>${esc(x.source || "")}</td>
+    </tr>`).join("");
+    setHTML($("candidatesOut"), `<div style="overflow:auto"><table>
+      <thead><tr><th>Name</th><th>Company</th><th>Role</th><th>School</th><th>LinkedIn</th>
+      <th>Email</th><th>Photo</th><th>Score</th><th>Source</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`);
+  }
+
+  setHTML($("rawOut"), esc(JSON.stringify(data, null, 2)));
+  renderDiagnosis(data);
+}
+
+// ---------- auto diagnosis ----------
+function renderDiagnosis(data) {
+  const status = data.status;
+  const clue = data.clue || {};
+  const cands = Array.isArray(data.candidates) ? data.candidates : [];
+  const v = data.verification;
+  const lines = [];
+  const add = (level, text) => lines.push({ level, text });
+
+  if (status === "needs_clarification") {
+    add("warn", "OpenAI Vision did not read a reliable name. Try a clearer badge/context crop, move closer, or pass the name in the transcript (\"find info on [Name]\").");
+  }
+  if (clue.fullName && cands.length === 0) {
+    add("warn", `OCR worked (read "${clue.fullName}"), but the Fiber lookup returned no candidates. Check the name spelling, or add company/school context.`);
+  }
+  if (cands.length > 0 && !cands.some((c) => c.profilePhotoUrl)) {
+    add("warn", "Fiber returned candidates but NONE have a profilePhotoUrl, so face verification cannot run. Profile-pic enrichment is the failure point.");
+  }
+  if (cands.length > 0 && v === null) {
+    add("warn", "No face verification result (verification is null). Either the live face produced no embedding, or no candidate had a profile photo. Check the live face crop and profile-photo fetch / CV path.");
+  }
+  if (v && v.faceDetected === false) {
+    add("bad", "CV did not detect a usable face in the live crop or the profile photo. Loosen the iOS face crop (add padding) and ensure a clear frontal face.");
+  }
+  if (v && v.score != null && v.faceDetected && !v.verified && v.score < (v.threshold ?? 0.32)) {
+    add("warn", `Faces compared, but score ${Number(v.score).toFixed(4)} is below threshold ${v.threshold}. Try a better face crop, or tune IDENTITY_FACE_VERIFY_THRESHOLD (carefully).`);
+  }
+  if (v && v.message && /mock/i.test(v.message)) {
+    add("bad", "Live or profile embedding fell back to MOCK (CV service unreachable from Convex). Nothing is truly verified. Check CV_SERVICE_URL and that the EC2 service is reachable from Convex.");
+  }
+  if (status === "possible") {
+    add("warn", "Identity found, but NOT face-verified. See above for whether the photo was missing, no face detected, or the score was below threshold.");
+  }
+  if (status === "not_found") {
+    add("warn", clue.fullName
+      ? `A name was read ("${clue.fullName}") but no profile matched. Fiber lookup returned nothing, or Fiber is not configured.`
+      : "No profile found.");
+  }
+  if (status === "error") {
+    add("bad", `The backend returned an error: ${esc(data.message || "unknown")}.`);
+  }
+  if (status === "verified") {
+    add("good", "End-to-end identity verification passed. Real CV embeddings on both sides and score ≥ threshold.");
+  }
+  if (lines.length === 0) add("good", "No issues detected.");
+
+  setHTML($("diagnosis"), lines.map((l) =>
+    `<div class="diag ${l.level === "good" ? "good" : l.level === "bad" ? "bad" : "warn"}">
+      <div class="title">Diagnosis</div><div>${l.text}</div></div>`).join(""));
+}
+
+// ---------- direct CV /embed ----------
+$("btnEmbed").onclick = async () => {
+  const btn = $("btnEmbed");
+  busy(btn, true, "embedding…");
+  const out = $("cvOut"), raw = $("cvRaw");
+  raw.style.display = "none";
+  try {
+    const r = await postJSON(cvUrl("/embed"), {
+      imageBase64: images.cv.base64,
+      imageMimeType: $("mimeType").value,
+      requestId: "dbg_embed_" + Date.now(),
+    });
+    const d = (typeof r.json === "object" && r.json) ? r.json : {};
+    const q = d.quality || {};
+    setHTML(out, kv([
+      ["HTTP", `${r.status}${r.ok ? " OK" : ""}`],
+      ["faceDetected", String(d.faceDetected)],
+      ["detectionScore", q.detectionScore],
+      ["cropWidth", q.cropWidth],
+      ["cropHeight", q.cropHeight],
+      ["model", q.model],
+      ["embedding len", Array.isArray(d.embedding) ? d.embedding.length : "null"],
+      ["latencyMs", d.latencyMs],
+      ["error", d.error],
+    ]));
+    raw.style.display = ""; setHTML(raw, esc(JSON.stringify(
+      Array.isArray(d.embedding) ? { ...d, embedding: `[${d.embedding.length} floats]` } : d, null, 2)));
+  } catch (err) {
+    setHTML(out, `<div class="diag bad" style="grid-column:1/3"><div class="title">Direct CV call failed</div>
+      <div>${esc(err.message)}</div>
+      <div class="muted" style="margin-top:6px">This is almost always a browser CORS block: the EC2 CV
+      service does not send <code>Access-Control-Allow-Origin</code>. Add CORS to <code>cv-service/main.py</code>
+      (and redeploy), or test /embed with <code>curl</code>. The main Convex identity flow above does NOT need
+      this — Convex calls the CV service server-side.</div></div>`);
+  } finally { busy(btn, false); }
+};
+
+refreshButtons();
+</script>
+</body>
+</html>

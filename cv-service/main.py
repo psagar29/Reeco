@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 # Pillow is used to decode arbitrary image bytes (jpeg/png/...) reliably,
 # then we hand a BGR numpy array to InsightFace.
-from PIL import Image
+from PIL import Image, ImageOps
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -65,6 +65,26 @@ EMBED_DIM = 512
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Recco CV Service", version="1.0.0")
+
+# CORS: allow the local identity-debugger tool (tools/identity-debugger, served on
+# port 5174) to call /embed and /health directly from the browser. Kept narrow on
+# purpose — the production identity flow calls this service SERVER-SIDE from Convex,
+# where CORS is irrelevant, so we do NOT open this to all origins. Add extra debug
+# origins via RECCO_CV_CORS_ORIGINS (comma-separated) if needed.
+from fastapi.middleware.cors import CORSMiddleware
+
+_default_cors = ["http://localhost:5174", "http://127.0.0.1:5174"]
+_extra_cors = [
+    o.strip()
+    for o in os.environ.get("RECCO_CV_CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_default_cors + _extra_cors,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Holds the loaded insightface.app.FaceAnalysis instance once ready.
 _face_app: Optional[Any] = None
@@ -165,7 +185,10 @@ def _decode_base64_image(image_b64: str) -> bytes:
 
 def _bytes_to_bgr(image_bytes: bytes) -> np.ndarray:
     """Decode image bytes to a BGR uint8 numpy array (OpenCV/InsightFace order)."""
-    pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    # iPhone/HEIC-derived JPEGs often carry EXIF orientation instead of baked
+    # pixels. InsightFace/OpenCV do not honor that metadata, so normalize here
+    # before handing the image to the detector.
+    pil = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
     rgb = np.asarray(pil)  # HxWx3, RGB
     bgr = rgb[:, :, ::-1].copy()  # InsightFace expects BGR
     return bgr
