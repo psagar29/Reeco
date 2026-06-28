@@ -25,6 +25,7 @@ export type FiberLookupInput = {
   personName: string;
   companyName?: string | null;
   schoolName?: string | null;
+  linkedinUrl?: string | null;
   numProfiles?: number;
 };
 
@@ -70,8 +71,8 @@ function firstArray(
     const val = obj[k];
     if (Array.isArray(val)) return val;
   }
-  // Sometimes nested one level under "result"/"response".
-  for (const wrapper of ["result", "response", "data"]) {
+  // Sometimes nested one level under "output"/"result"/"response".
+  for (const wrapper of ["output", "result", "response", "data"]) {
     const inner = obj[wrapper];
     if (inner && typeof inner === "object" && !Array.isArray(inner)) {
       const found = firstArray(inner as Record<string, unknown>, keys);
@@ -89,6 +90,78 @@ function pick(p: Record<string, unknown>, keys: string[]): unknown {
     if (p[k] !== undefined && p[k] !== null) return p[k];
   }
   return undefined;
+}
+
+function pickNested(
+  p: Record<string, unknown>,
+  key: string,
+  nestedKeys: string[],
+): unknown {
+  const inner = p[key];
+  if (!inner || typeof inner !== "object" || Array.isArray(inner)) {
+    return undefined;
+  }
+  return pick(inner as Record<string, unknown>, nestedKeys);
+}
+
+function linkedinUrlFrom(p: Record<string, unknown>): string | null {
+  const direct = str(
+    pick(p, [
+      "linkedinUrl",
+      "linkedin_url",
+      "linkedin",
+      "profileUrl",
+      "profile_url",
+      "url",
+    ]),
+  );
+  if (direct) return direct;
+
+  const slugValue = str(
+    pick(p, [
+      "primary_slug",
+      "linkedinSlug",
+      "linkedin_slug",
+      "linkedinPrimarySlug",
+      "linkedin_primary_slug",
+    ]),
+  );
+  if (!slugValue) return null;
+  if (/^https?:\/\//i.test(slugValue)) return slugValue;
+  return `https://www.linkedin.com/in/${slugValue.replace(/^\/?in\//, "")}`;
+}
+
+function buildProfileSearchQuery(input: FiberLookupInput): string {
+  const parts = [`Find LinkedIn profiles for "${input.personName}"`];
+  if (input.companyName) parts.push(`associated with "${input.companyName}"`);
+  if (input.schoolName) parts.push(`at or from "${input.schoolName}"`);
+  return parts.join(" ");
+}
+
+async function postFiberJson(
+  url: string,
+  body: Record<string, unknown>,
+  label: string,
+  opts: FiberClientOptions,
+): Promise<unknown> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 20000);
+  try {
+    const res = await doFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Fiber ${label} HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+    return res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -121,22 +194,19 @@ export function parseFiberPeople(
       str(pick(p, ["fullName", "full_name", "name", "displayName"])) ??
       joinName(pick(p, NAME_KEYS_FIRST), pick(p, NAME_KEYS_LAST));
     if (!fullName) return;
-    const linkedinUrl = str(
-      pick(p, [
-        "linkedinUrl",
-        "linkedin_url",
-        "linkedin",
-        "profileUrl",
-        "profile_url",
-        "url",
-      ]),
-    );
+    const linkedinUrl = linkedinUrlFrom(p);
     out.push({
       candidateId: `cand_${i}_${slug(fullName)}`,
       fullName,
       headline: str(pick(p, ["headline", "summary", "bio", "tagline"])),
       role: str(
-        pick(p, ["role", "title", "jobTitle", "job_title", "occupation"]),
+        pick(p, ["role", "title", "jobTitle", "job_title", "occupation"]) ??
+          pickNested(p, "current_job", [
+            "role",
+            "title",
+            "jobTitle",
+            "job_title",
+          ]),
       ),
       company: str(
         pick(p, [
@@ -146,7 +216,7 @@ export function parseFiberPeople(
           "organization",
           "employer",
           "currentCompany",
-        ]),
+        ]) ?? pickNested(p, "current_job", ["company_name", "companyName"]),
       ),
       school: str(pick(p, ["school", "university", "education"])),
       location: str(pick(p, ["location", "city", "region", "country"])),
@@ -165,6 +235,7 @@ export function parseFiberPeople(
           "imageUrl",
           "image_url",
           "picture",
+          "profile_pic",
           "avatar",
           "avatarUrl",
         ]),
@@ -184,37 +255,78 @@ export async function findCandidates(
   opts: FiberClientOptions,
 ): Promise<IdentityCandidate[]> {
   if (!opts.config.apiKey) throw new Error("Fiber: no API key configured");
-  const doFetch = opts.fetchImpl ?? fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 20000);
+  const errors: string[] = [];
+
+  if (input.linkedinUrl) {
+    try {
+      const raw = await postFiberJson(
+        `${opts.config.baseUrl}/v1/kitchen-sink/person`,
+        {
+          apiKey: opts.config.apiKey,
+          profileIdentifier: {
+            identifier: "linkedinUrl",
+            value: input.linkedinUrl,
+          },
+          liveFetch: false,
+        },
+        "kitchen-sink",
+        opts,
+      );
+      const candidates = parseFiberPeople(raw, "fiber:kitchen-sink");
+      if (candidates.length > 0) return candidates;
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Badge scans usually produce a name plus loose context ("Columbia",
+  // "Browser Use", event text). Fiber's natural-language search is the right
+  // first pass for that shape because it discovers candidate LinkedIn profiles.
   try {
-    // Fiber's hackathon API authenticates via `apiKey` IN THE JSON BODY (not a
-    // Bearer header), and wraps each query field in a `{ value, ... }` object.
+    const raw = await postFiberJson(
+      `${opts.config.baseUrl}/v1/nlp-search/run`,
+      {
+        apiKey: opts.config.apiKey,
+        query: buildProfileSearchQuery(input),
+        pageSize: input.numProfiles ?? 5,
+        getDetailedEducation: false,
+        getDetailedWorkExperience: false,
+      },
+      "nlp-search",
+      opts,
+    );
+    const candidates = parseFiberPeople(raw, "fiber:nlp-search");
+    if (candidates.length > 0) return candidates;
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : String(err));
+  }
+
+  // Fallback: Kitchen Sink is better when the OCR found a precise name/company
+  // pair, but it is less useful for name-only discovery.
+  try {
     const body: Record<string, unknown> = {
       apiKey: opts.config.apiKey,
       personName: { value: input.personName, looseMatch: true },
       numProfiles: input.numProfiles ?? 5,
-      liveFetch: true,
+      liveFetch: false,
     };
     if (input.companyName) body.companyName = { value: input.companyName };
     if (input.schoolName) body.schoolName = { value: input.schoolName };
 
-    const res = await doFetch(`${opts.config.baseUrl}/v1/kitchen-sink/person`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(
-        `Fiber kitchen-sink HTTP ${res.status}: ${body.slice(0, 200)}`,
-      );
-    }
-    return parseFiberPeople(await res.json(), "fiber:kitchen-sink");
-  } finally {
-    clearTimeout(timer);
+    const raw = await postFiberJson(
+      `${opts.config.baseUrl}/v1/kitchen-sink/person`,
+      body,
+      "kitchen-sink",
+      opts,
+    );
+    const candidates = parseFiberPeople(raw, "fiber:kitchen-sink");
+    if (candidates.length > 0) return candidates;
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : String(err));
   }
+
+  if (errors.length > 0) throw new Error(errors.join("; "));
+  return [];
 }
 
 /** Tolerantly build a linkedinUrl(lowercased) -> photoUrl map. */

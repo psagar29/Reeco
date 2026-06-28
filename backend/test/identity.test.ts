@@ -1,12 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { sanitizeClue } from "../convex/lib/openaiVision.js";
-import { parseFiberPeople } from "../convex/lib/fiber.js";
+import { findCandidates, parseFiberPeople } from "../convex/lib/fiber.js";
 import {
   textMatchScore,
   combineScores,
   decideStatus,
   pickBest,
 } from "../convex/lib/identityScoring.js";
+import {
+  extractLinkedInProfileUrl,
+  extractSpokenIdentityName,
+} from "../convex/lib/transcriptName.js";
 import type {
   IdentityCandidate,
   IdentityClue,
@@ -105,9 +109,157 @@ describe("parseFiberPeople", () => {
     expect(out[0]!.fullName).toBe("Grace Hopper");
   });
 
+  it("maps Fiber's documented output.data profile shape", () => {
+    const out = parseFiberPeople({
+      output: {
+        data: [
+          {
+            name: "Ada Lovelace",
+            headline: "Founder",
+            primary_slug: "ada-lovelace",
+            profile_pic: "https://img/ada.jpg",
+            current_job: { company_name: "Analytical Engines" },
+          },
+        ],
+      },
+    });
+
+    expect(out).toHaveLength(1);
+    expect(out[0]!.fullName).toBe("Ada Lovelace");
+    expect(out[0]!.linkedinUrl).toBe("https://www.linkedin.com/in/ada-lovelace");
+    expect(out[0]!.company).toBe("Analytical Engines");
+    expect(out[0]!.profilePhotoUrl).toBe("https://img/ada.jpg");
+  });
+
   it("returns [] for garbage and skips entries without a name", () => {
     expect(parseFiberPeople(null)).toEqual([]);
     expect(parseFiberPeople({ profiles: [{ company: "Acme" }] })).toEqual([]);
+  });
+});
+
+describe("findCandidates", () => {
+  it("uses natural-language profile search before falling back to Kitchen Sink", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      const body =
+        calls.length === 1
+          ? { output: { data: [] } }
+          : {
+              output: {
+                data: [
+                  {
+                    name: "Ada Lovelace",
+                    primary_slug: "ada-lovelace",
+                    profile_pic: "https://img/ada.jpg",
+                  },
+                ],
+              },
+            };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as typeof fetch;
+
+    const out = await findCandidates(
+      { personName: "Ada Lovelace", companyName: "Analytical Engines" },
+      {
+        config: { apiKey: "test-key", baseUrl: "https://api.fiber.ai" },
+        fetchImpl,
+      },
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.url).toContain("/v1/nlp-search/run");
+    expect(calls[0]!.body.query).toContain("Ada Lovelace");
+    expect(calls[1]!.url).toContain("/v1/kitchen-sink/person");
+    expect(out).toHaveLength(1);
+    expect(out[0]!.source).toBe("fiber:kitchen-sink");
+    expect(out[0]!.linkedinUrl).toBe("https://www.linkedin.com/in/ada-lovelace");
+  });
+
+  it("uses an explicitly provided LinkedIn URL before profile search", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          output: {
+            data: [
+              {
+                name: "Ada Lovelace",
+                primary_slug: "ada-lovelace",
+                profile_pic: "https://img/ada.jpg",
+              },
+            ],
+          },
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    const out = await findCandidates(
+      {
+        personName: "Ada Lovelace",
+        linkedinUrl: "https://www.linkedin.com/in/ada-lovelace",
+      },
+      {
+        config: { apiKey: "test-key", baseUrl: "https://api.fiber.ai" },
+        fetchImpl,
+      },
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain("/v1/kitchen-sink/person");
+    expect(calls[0]!.body.profileIdentifier).toEqual({
+      identifier: "linkedinUrl",
+      value: "https://www.linkedin.com/in/ada-lovelace",
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.linkedinUrl).toBe("https://www.linkedin.com/in/ada-lovelace");
+  });
+});
+
+describe("extractSpokenIdentityName", () => {
+  it("extracts an explicit name from identity commands", () => {
+    expect(extractSpokenIdentityName("find info on Saahith Veeramaneni")).toBe(
+      "Saahith Veeramaneni",
+    );
+    expect(extractSpokenIdentityName("get linkedin for Zhi Hao")).toBe(
+      "Zhi Hao",
+    );
+    expect(extractSpokenIdentityName("look up Dat Nguyen linkedin")).toBe(
+      "Dat Nguyen",
+    );
+  });
+
+  it("ignores pronoun-only target commands", () => {
+    expect(extractSpokenIdentityName("find info on him")).toBeNull();
+    expect(extractSpokenIdentityName("get her linkedin")).toBeNull();
+    expect(extractSpokenIdentityName("who is this person")).toBeNull();
+  });
+});
+
+describe("extractLinkedInProfileUrl", () => {
+  it("extracts and normalizes LinkedIn profile URLs", () => {
+    expect(
+      extractLinkedInProfileUrl(
+        "find info on linkedin.com/in/saahith-veeramaneni-960942272",
+      ),
+    ).toBe("https://www.linkedin.com/in/saahith-veeramaneni-960942272");
+    expect(
+      extractLinkedInProfileUrl(
+        "https://www.linkedin.com/in/dat888/",
+      ),
+    ).toBe("https://www.linkedin.com/in/dat888");
+  });
+
+  it("ignores non-profile text", () => {
+    expect(extractLinkedInProfileUrl("find info on him")).toBeNull();
   });
 });
 

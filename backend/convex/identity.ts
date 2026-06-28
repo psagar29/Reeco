@@ -46,7 +46,16 @@ import {
   decideStatus,
   pickBest,
 } from "./lib/identityScoring.js";
+import {
+  extractLinkedInProfileUrl,
+  extractSpokenIdentityName,
+} from "./lib/transcriptName.js";
 import type { ActionCtx } from "./_generated/server.js";
+
+const FIBER_LOOKUP_TIMEOUT_MS = 12000;
+const FIBER_ENRICH_TIMEOUT_MS = 6000;
+const PROFILE_PHOTO_TIMEOUT_MS = 10000;
+const PROFILE_VERIFICATION_CANDIDATE_LIMIT = 3;
 
 const emptyClue = (evidence: string): IdentityClue => ({
   rawText: "",
@@ -57,6 +66,47 @@ const emptyClue = (evidence: string): IdentityClue => ({
   confidence: 0,
   evidence,
 });
+
+function externalErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.name === "AbortError" ? "request timed out" : err.message;
+  }
+  return String(err);
+}
+
+function withSpokenName(
+  clue: IdentityClue,
+  spokenName: string | null,
+): IdentityClue {
+  if (!spokenName) return clue;
+  const evidence = [clue.evidence, "spoken name"].filter(Boolean).join("; ");
+  return {
+    ...clue,
+    rawText: clue.rawText
+      ? `${clue.rawText} | spoken: ${spokenName}`
+      : `spoken: ${spokenName}`,
+    fullName: spokenName,
+    confidence: Math.max(clue.confidence, 0.95),
+    evidence,
+  };
+}
+
+function withProvidedLinkedIn(
+  clue: IdentityClue,
+  linkedinUrl: string | null,
+): IdentityClue {
+  if (!linkedinUrl) return clue;
+  const evidence = [clue.evidence, "provided LinkedIn URL"]
+    .filter(Boolean)
+    .join("; ");
+  return {
+    ...clue,
+    rawText: clue.rawText
+      ? `${clue.rawText} | linkedin: ${linkedinUrl}`
+      : `linkedin: ${linkedinUrl}`,
+    evidence,
+  };
+}
 
 /** Encode raw bytes to base64 (chunked so we don't blow the call stack). */
 function base64FromBytes(bytes: Uint8Array): string {
@@ -90,7 +140,7 @@ async function verifyCandidate(
   // Bound the profile-photo download so a slow or bad image URL can never hang
   // the whole identity request.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), PROFILE_PHOTO_TIMEOUT_MS);
   try {
     const res = await fetch(candidate.profilePhotoUrl, {
       signal: controller.signal,
@@ -106,6 +156,7 @@ async function verifyCandidate(
       imageMimeType: mime,
       requestId: `${candidate.candidateId}-photo`,
       cvServiceUrl,
+      timeoutMs: PROFILE_PHOTO_TIMEOUT_MS,
     });
     if (!photo.faceDetected || !photo.embedding) {
       return { ...base, message: "no face in profile photo" };
@@ -236,6 +287,8 @@ export const resolveTarget = action({
       const cvServiceUrl = getCvServiceUrl(process.env);
       const { minOcrConfidence, faceVerifyThreshold } =
         getIdentityThresholds(process.env);
+      const spokenName = extractSpokenIdentityName(transcript);
+      const providedLinkedinUrl = extractLinkedInProfileUrl(transcript);
 
       // 1. OCR the badge / context crop.
       let clue: IdentityClue;
@@ -258,24 +311,51 @@ export const resolveTarget = action({
           );
         }
       }
+      clue = withSpokenName(clue, spokenName);
+      clue = withProvidedLinkedIn(clue, providedLinkedinUrl);
 
-      if (!clue.fullName || clue.confidence < minOcrConfidence) {
+      if (
+        !providedLinkedinUrl &&
+        (!clue.fullName || clue.confidence < minOcrConfidence)
+      ) {
         return finish("needs_clarification", clue, [], null, null);
       }
 
       // 2. Fiber candidate lookup (+ best-effort profile-pic enrichment).
       let candidates: IdentityCandidate[] = [];
       if (fiber.apiKey) {
-        candidates = await findCandidates(
-          {
-            personName: clue.fullName,
-            companyName: clue.company,
-            schoolName: clue.school,
-            numProfiles: 5,
-          },
-          { config: fiber },
-        );
-        candidates = await enrichProfilePics(candidates, { config: fiber });
+        try {
+          candidates = await findCandidates(
+            {
+              personName: clue.fullName ?? spokenName ?? "LinkedIn profile",
+              companyName: clue.company,
+              schoolName: clue.school,
+              linkedinUrl: providedLinkedinUrl,
+              numProfiles: 5,
+            },
+            { config: fiber, timeoutMs: FIBER_LOOKUP_TIMEOUT_MS },
+          );
+          candidates = await enrichProfilePics(candidates, {
+            config: fiber,
+            timeoutMs: FIBER_ENRICH_TIMEOUT_MS,
+          });
+        } catch (err) {
+          return finish(
+            "not_found",
+            {
+              ...clue,
+              evidence: [
+                clue.evidence,
+                `Fiber lookup failed: ${externalErrorMessage(err)}`,
+              ]
+                .filter(Boolean)
+                .join("; "),
+            },
+            [],
+            null,
+            null,
+          );
+        }
       } else {
         return finish(
           "not_found",
@@ -290,9 +370,20 @@ export const resolveTarget = action({
         return finish("not_found", clue, [], null, null);
       }
 
-      // 3. Embed the live face once, then face-verify each candidate that has a
-      //    profile photo. Track whether the live embedding is REAL CV — a
-      //    candidate can only be "verified" when both sides are real CV.
+      if (providedLinkedinUrl) {
+        const first = candidates[0];
+        if (first) {
+          clue = {
+            ...clue,
+            fullName: first.fullName,
+            confidence: Math.max(clue.confidence, 0.95),
+          };
+        }
+      }
+
+      // 3. Embed the live face once, then face-verify only the best text
+      //    candidates with profile photos. This keeps the live scan responsive
+      //    when some remote LinkedIn/photo URLs are slow.
       let liveEmbedding: number[] | null = null;
       let liveSource: "cv" | "mock" = "mock";
       if (args.faceImageBase64) {
@@ -308,18 +399,38 @@ export const resolveTarget = action({
 
       const verifications = new Map<string, FaceVerification>();
       for (const cand of candidates) {
-        let verification: FaceVerification | null = null;
-        if (liveEmbedding && cand.profilePhotoUrl) {
-          verification = await verifyCandidate(
-            cand,
-            liveEmbedding,
+        cand.matchScore = combineScores({
+          clue,
+          candidate: cand,
+          verification: null,
+        });
+      }
+      candidates.sort((a, b) => b.matchScore - a.matchScore);
+
+      const verificationTargets = liveEmbedding
+        ? candidates
+            .filter((candidate) => candidate.profilePhotoUrl)
+            .slice(0, PROFILE_VERIFICATION_CANDIDATE_LIMIT)
+        : [];
+      await Promise.all(
+        verificationTargets.map(async (candidate) => {
+          const verification = await verifyCandidate(
+            candidate,
+            liveEmbedding!,
             liveSource,
             cvServiceUrl,
             faceVerifyThreshold,
           );
-          verifications.set(cand.candidateId, verification);
-        }
-        cand.matchScore = combineScores({ clue, candidate: cand, verification });
+          verifications.set(candidate.candidateId, verification);
+        }),
+      );
+
+      for (const cand of candidates) {
+        cand.matchScore = combineScores({
+          clue,
+          candidate: cand,
+          verification: verifications.get(cand.candidateId) ?? null,
+        });
       }
 
       candidates.sort((a, b) => b.matchScore - a.matchScore);
@@ -331,7 +442,10 @@ export const resolveTarget = action({
       // 4. Best-effort: backfill the chosen candidate's email.
       let chosen = best;
       if (chosen && !chosen.email) {
-        chosen = await enrichContactDetails(chosen, { config: fiber });
+        chosen = await enrichContactDetails(chosen, {
+          config: fiber,
+          timeoutMs: FIBER_ENRICH_TIMEOUT_MS,
+        });
         if (best) {
           best.email = chosen.email;
         }
