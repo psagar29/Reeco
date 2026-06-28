@@ -41,8 +41,10 @@ uvicorn main:app --reload --port 8000
 
 The service binds to `http://127.0.0.1:8000`.
 
-On first startup InsightFace downloads the `buffalo_l` model pack
-(~300 MB) into `~/.insightface/models/`. The first launch is slow; later
+On first startup InsightFace downloads the configured model pack into
+`~/.insightface/models/` — the default `buffalo_s` (~125 MB download) or the
+larger, higher-accuracy `buffalo_l` (~300 MB) if you set
+`RECCO_CV_MODEL=buffalo_l`. The first launch is slow (download + warmup); later
 launches are fast. `/health` reports `ready: true` once the model is loaded.
 
 ---
@@ -83,11 +85,12 @@ Base URL (local default): `http://127.0.0.1:8000`
 ### `GET /health`
 
 ```json
-{ "ok": true, "model": "buffalo_l", "ready": true }
+{ "ok": true, "model": "buffalo_s", "ready": true, "detSize": 320, "minDetScore": 0.3 }
 ```
 
 `ok` is true while the process is up. `ready` is true only once the model has
-loaded. If loading failed, an `error` field explains why.
+loaded. `detSize` and `minDetScore` echo the active detector configuration. If
+loading failed, an `error` field explains why.
 
 ### `POST /embed`
 
@@ -125,7 +128,7 @@ requestId=track_123
     "detectionScore": 0.97,
     "cropWidth": 180,
     "cropHeight": 180,
-    "model": "buffalo_l"
+    "model": "buffalo_s"
   },
   "latencyMs": 421
 }
@@ -138,7 +141,7 @@ requestId=track_123
   "requestId": "track_123",
   "faceDetected": false,
   "embedding": null,
-  "quality": { "faceDetected": false, "cropWidth": 52, "cropHeight": 48, "model": "buffalo_l" },
+  "quality": { "faceDetected": false, "cropWidth": 52, "cropHeight": 48, "model": "buffalo_s" },
   "error": "No usable face detected"
 }
 ```
@@ -160,7 +163,7 @@ Returns detected face boxes + scores for tuning. Accepts the same JSON or
 multipart input.
 
 ```json
-{ "faceCount": 1, "faces": [{ "bbox": [x1,y1,x2,y2], "width": 180, "height": 180, "detScore": 0.97 }], "model": "buffalo_l" }
+{ "faceCount": 1, "faces": [{ "bbox": [x1,y1,x2,y2], "width": 180, "height": 180, "detScore": 0.97 }], "model": "buffalo_s" }
 ```
 
 ---
