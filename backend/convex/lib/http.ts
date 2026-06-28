@@ -16,6 +16,8 @@
 
 import type { FaceMatchResult, FilterCommand } from "./types.js";
 import type { ScanMemoryUpsertInput } from "./scanMemory.js";
+import { sanitizeMission, type MissionProfile } from "./mission.js";
+import type { OutreachDraft } from "./outreach.js";
 
 /** An error carrying the HTTP status the bridge should return. */
 export class HttpError extends Error {
@@ -247,13 +249,41 @@ function optString(value: unknown): string | null {
 }
 
 /**
+ * Normalize an arbitrary mission object from a request into a clean, complete
+ * `MissionProfile` (or undefined when absent). Unknown keys (e.g. id/clientId)
+ * are ignored; missing fields fall back to the deterministic parser.
+ */
+export function normalizeMission(value: unknown): MissionProfile | undefined {
+  if (value === undefined || value === null || typeof value !== "object") {
+    return undefined;
+  }
+  const raw = (value as Record<string, unknown>).rawText;
+  return sanitizeMission(value, typeof raw === "string" ? raw : "", Date.now());
+}
+
+/** Coerce an arbitrary object into a complete OutreachDraft, or null. */
+export function parseOutreachDraft(value: unknown): OutreachDraft | null {
+  if (!value || typeof value !== "object") return null;
+  const o = value as Record<string, unknown>;
+  const str = (k: string): string => (typeof o[k] === "string" ? (o[k] as string) : "");
+  return {
+    linkedinDm: str("linkedinDm"),
+    coldEmailSubject: str("coldEmailSubject"),
+    coldEmail: str("coldEmail"),
+    inPersonOpener: str("inPersonOpener"),
+    generatedAt: typeof o.generatedAt === "number" ? o.generatedAt : Date.now(),
+  };
+}
+
+/**
  * Validate the body of `POST /api/brain/memories/upsert`. `scanId` and `status`
  * are required; every other field is optional metadata (text/links/scores only,
- * never images). Unknown fields are ignored.
+ * never images) plus an optional `clientId` and `mission` (which triggers
+ * immediate scoring). Unknown fields are ignored.
  */
 export function parseScanMemoryUpsertRequest(
   body: unknown,
-): ScanMemoryUpsertInput {
+): ScanMemoryUpsertInput & { mission?: MissionProfile } {
   const root = asObject(body);
   if (typeof root.scanId !== "string" || root.scanId.length === 0) {
     throw new HttpError(400, "`scanId` must be a non-empty string");
@@ -261,9 +291,10 @@ export function parseScanMemoryUpsertRequest(
   if (typeof root.status !== "string" || root.status.length === 0) {
     throw new HttpError(400, "`status` must be a non-empty string");
   }
-  return {
+  const out: ScanMemoryUpsertInput & { mission?: MissionProfile } = {
     scanId: root.scanId,
     status: root.status,
+    clientId: optString(root.clientId),
     name: optString(root.name),
     headline: optString(root.headline),
     role: optString(root.role),
@@ -280,6 +311,85 @@ export function parseScanMemoryUpsertRequest(
     candidateCount:
       typeof root.candidateCount === "number" ? root.candidateCount : 0,
   };
+  const mission = normalizeMission(root.mission);
+  if (mission) out.mission = mission;
+  return out;
+}
+
+/** Validate the body of `POST /api/mission/parse`. */
+export function parseMissionParseRequest(body: unknown): {
+  clientId: string;
+  rawText: string;
+} {
+  const root = asObject(body);
+  if (typeof root.clientId !== "string" || root.clientId.length === 0) {
+    throw new HttpError(400, "`clientId` must be a non-empty string");
+  }
+  const rawText = typeof root.rawText === "string" ? root.rawText : "";
+  return { clientId: root.clientId, rawText };
+}
+
+/** Validate the body of `POST /api/mission/current`. */
+export function parseMissionCurrentRequest(body: unknown): { clientId: string } {
+  const root = asObject(body);
+  if (typeof root.clientId !== "string" || root.clientId.length === 0) {
+    throw new HttpError(400, "`clientId` must be a non-empty string");
+  }
+  return { clientId: root.clientId };
+}
+
+/** Validate the body of `POST /api/brain/memories/score`. */
+export function parseScoreRequest(body: unknown): {
+  id: string;
+  clientId?: string | null;
+  mission: MissionProfile;
+} {
+  const root = asObject(body);
+  if (typeof root.id !== "string" || root.id.length === 0) {
+    throw new HttpError(400, "`id` must be a non-empty string");
+  }
+  const mission = normalizeMission(root.mission);
+  if (!mission) {
+    throw new HttpError(400, "`mission` must be a mission object");
+  }
+  return { id: root.id, clientId: optString(root.clientId), mission };
+}
+
+const FOLLOW_UP_STATUSES = new Set(["new", "drafted", "edited", "sent", "archived"]);
+
+/** Validate the body of `POST /api/brain/memories/follow-up-status`. */
+export function parseFollowUpStatusRequest(body: unknown): {
+  id: string;
+  status: string;
+  editedOutreach?: OutreachDraft | null;
+  sentAt?: number | null;
+} {
+  const root = asObject(body);
+  if (typeof root.id !== "string" || root.id.length === 0) {
+    throw new HttpError(400, "`id` must be a non-empty string");
+  }
+  if (typeof root.status !== "string" || !FOLLOW_UP_STATUSES.has(root.status)) {
+    throw new HttpError(
+      400,
+      '`status` must be one of "new" | "drafted" | "edited" | "sent" | "archived"',
+    );
+  }
+  const out: {
+    id: string;
+    status: string;
+    editedOutreach?: OutreachDraft | null;
+    sentAt?: number | null;
+  } = { id: root.id, status: root.status };
+
+  if (root.editedOutreach === null) {
+    out.editedOutreach = null;
+  } else if (root.editedOutreach !== undefined) {
+    out.editedOutreach = parseOutreachDraft(root.editedOutreach);
+  }
+  if (root.sentAt === null || typeof root.sentAt === "number") {
+    out.sentAt = root.sentAt as number | null;
+  }
+  return out;
 }
 
 /** Validate the body of `POST /api/brain/memories/notes`. */
@@ -302,20 +412,26 @@ export function parseGenerateOutreachRequest(body: unknown): {
   id: string;
   eventName?: string | null;
   senderName?: string | null;
+  mission?: MissionProfile;
 } {
   const root = asObject(body);
   if (typeof root.id !== "string" || root.id.length === 0) {
     throw new HttpError(400, "`id` must be a non-empty string");
   }
-  const out: { id: string; eventName?: string | null; senderName?: string | null } = {
-    id: root.id,
-  };
+  const out: {
+    id: string;
+    eventName?: string | null;
+    senderName?: string | null;
+    mission?: MissionProfile;
+  } = { id: root.id };
   if (root.eventName === null || typeof root.eventName === "string") {
     out.eventName = root.eventName as string | null;
   }
   if (root.senderName === null || typeof root.senderName === "string") {
     out.senderName = root.senderName as string | null;
   }
+  const mission = normalizeMission(root.mission);
+  if (mission) out.mission = mission;
   return out;
 }
 

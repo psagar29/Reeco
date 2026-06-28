@@ -21,6 +21,10 @@ export type OutreachInput = {
   eventName?: string | null;
   /** Sign-off name for the cold email. Omitted from the sign-off when empty. */
   senderName?: string | null;
+  /** Mission goal type — adds a subtle, goal-aware angle when present. */
+  goalType?: string | null;
+  /** Lead priority ("hot" | "warm" | ...). Reserved for tone tuning. */
+  priority?: string | null;
 };
 
 export type OutreachDraft = {
@@ -52,6 +56,31 @@ function eventOf(input: OutreachInput): string {
   return (input.eventName ?? "").trim() || "the event";
 }
 
+/**
+ * A subtle, goal-aware extra clause. Returns "" for no/networking/other goals,
+ * so the no-mission output stays identical to the original deterministic draft.
+ */
+export function missionAngle(input: OutreachInput): string {
+  switch ((input.goalType ?? "").trim()) {
+    case "fundraising":
+      return "I'd genuinely value your perspective as an investor as we shape our next round.";
+    case "get_hired":
+      return "I'm exploring my next role, and your team came to mind.";
+    case "hiring":
+      return "We're growing the team and I'd love to keep you in the loop.";
+    case "customers":
+      return "Curious whether what we're building could be useful for your team.";
+    case "sponsors":
+      return "Wondering if there might be a fit for a partnership down the line.";
+    case "cofounder":
+      return "Always keen to meet people I might end up building with.";
+    case "founders":
+      return "Always up for trading notes with other founders.";
+    default:
+      return "";
+  }
+}
+
 /** Build all three outreach variants deterministically (no external calls). */
 export function buildOutreachOffline(
   input: OutreachInput,
@@ -62,10 +91,13 @@ export function buildOutreachOffline(
   const event = eventOf(input);
   const sender = (input.senderName ?? "").trim();
   const signoff = sender ? `Best,\n${sender}` : "Best";
+  const angle = missionAngle(input);
+  const dmAngle = angle ? ` ${angle}` : "";
+  const emailAngle = angle ? `${angle}\n\n` : "";
 
   const linkedinDm =
     `Hey ${fn}, great meeting you at ${event}. ` +
-    `Loved hearing about ${topic}. We're building Recco, an AR memory layer ` +
+    `Loved hearing about ${topic}.${dmAngle} We're building Recco, an AR memory layer ` +
     `for event networking — would love to compare notes.`;
 
   const coldEmailSubject = `Great meeting you at ${event}`;
@@ -75,6 +107,7 @@ export function buildOutreachOffline(
     `Great meeting you at ${event}. I noticed you're working around ${topic}, ` +
     `and it connected with what we're building in Recco: a lightweight AR ` +
     `memory layer for event networking.\n\n` +
+    `${emailAngle}` +
     `Would love to compare notes sometime this week.\n\n` +
     `${signoff}`;
 

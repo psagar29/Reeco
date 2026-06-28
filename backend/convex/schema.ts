@@ -15,6 +15,8 @@ import {
   brainStateValidator,
   faceMatchResultValidator,
   filterCommandValidator,
+  missionCoreValidator,
+  missionSnapshotValidator,
   outreachDraftValidator,
   personLinksValidator,
 } from "./validators.js";
@@ -103,10 +105,29 @@ export default defineSchema({
     firstScannedAt: v.number(),
     lastScannedAt: v.number(),
     scanCount: v.number(),
+    // Mission-driven lead scoring + follow-up. All optional so existing rows
+    // (written before this feature) keep validating.
+    clientId: v.optional(v.union(v.string(), v.null())),
+    leadPriority: v.optional(v.union(v.string(), v.null())),
+    leadScore: v.optional(v.union(v.number(), v.null())),
+    leadReasons: v.optional(v.array(v.string())),
+    nextAction: v.optional(v.union(v.string(), v.null())),
+    followUpStatus: v.optional(v.union(v.string(), v.null())),
+    sentAt: v.optional(v.union(v.number(), v.null())),
+    editedOutreach: v.optional(v.union(outreachDraftValidator, v.null())),
+    missionSnapshot: v.optional(v.union(missionSnapshotValidator, v.null())),
   })
     .index("by_linkedinKey", ["linkedinKey"])
     .index("by_nameCompanyKey", ["nameCompanyKey"])
-    .index("by_lastScannedAt", ["lastScannedAt"]),
+    .index("by_lastScannedAt", ["lastScannedAt"])
+    .index("by_clientId_lastScannedAt", ["clientId", "lastScannedAt"])
+    .index("by_clientId_priority", ["clientId", "leadPriority"]),
+
+  // One stored mission ("Today's Goal") per anonymous clientId. Text only.
+  missionProfiles: defineTable({
+    clientId: v.string(),
+    ...missionCoreValidator.fields,
+  }).index("by_clientId", ["clientId"]),
 });
 
 // Re-export so callers can build args that match the stored filter shape.

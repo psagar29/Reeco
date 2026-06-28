@@ -10,6 +10,8 @@
  * badge images (mirroring the `identityLookups` privacy stance).
  */
 
+import type { OutreachDraft } from "./outreach.js";
+
 /** User-facing confidence buckets for a saved scan. */
 export type ScanConfidence =
   | "verified"
@@ -17,11 +19,16 @@ export type ScanConfidence =
   | "needs_confirmation"
   | "unknown";
 
+/** Compact mission snapshot stored alongside a scored memory. */
+export type MissionSnapshot = { goalType: string; rawText: string };
+
 /** What the iOS app posts after an identity resolve (text/links/scores only). */
 export type ScanMemoryUpsertInput = {
   scanId: string;
   /** Raw IdentityResolveStatus: verified | possible | not_found | needs_clarification | error. */
   status: string;
+  /** Anonymous per-install id so one user's Brain stays separate. */
+  clientId?: string | null;
   name?: string | null;
   headline?: string | null;
   role?: string | null;
@@ -40,6 +47,7 @@ export type ScanMemoryUpsertInput = {
 /** The stored, persisted fields (minus Convex `_id`, `notes`, `outreach`). */
 export type ScanMemoryFields = {
   scanId: string;
+  clientId: string | null;
   personId: string | null;
   name: string | null;
   headline: string | null;
@@ -57,6 +65,17 @@ export type ScanMemoryFields = {
   firstScannedAt: number;
   lastScannedAt: number;
   scanCount: number;
+  // Mission-driven lead fields. The scorer overwrites the lead* values; the
+  // follow-up* values (status/sentAt/editedOutreach) are carried forward so a
+  // re-scan never undoes a "Sent".
+  leadPriority: string | null;
+  leadScore: number | null;
+  leadReasons: string[];
+  nextAction: string | null;
+  followUpStatus: string;
+  sentAt: number | null;
+  editedOutreach: OutreachDraft | null;
+  missionSnapshot: MissionSnapshot | null;
 };
 
 /** Map a raw identity status to a saved confidence bucket. */
@@ -160,6 +179,7 @@ export function mergeMemory(
 
   return {
     scanId: input.scanId,
+    clientId: prefer(clean(input.clientId), existing?.clientId),
     personId: prefer(clean(input.personId), existing?.personId),
     name: mergedName,
     headline: prefer(clean(input.headline), existing?.headline),
@@ -180,5 +200,42 @@ export function mergeMemory(
     firstScannedAt: existing?.firstScannedAt ?? now,
     lastScannedAt: now,
     scanCount: (existing?.scanCount ?? 0) + 1,
+    // Lead values are recomputed by the scorer after merge; carry the previous
+    // ones so an unscored re-scan keeps the last result. Follow-up state always
+    // carries forward.
+    leadPriority: existing?.leadPriority ?? null,
+    leadScore: existing?.leadScore ?? null,
+    leadReasons: existing?.leadReasons ?? [],
+    nextAction: existing?.nextAction ?? null,
+    followUpStatus: existing?.followUpStatus ?? "new",
+    sentAt: existing?.sentAt ?? null,
+    editedOutreach: existing?.editedOutreach ?? null,
+    missionSnapshot: existing?.missionSnapshot ?? null,
+  };
+}
+
+/**
+ * Apply a computed lead score onto merged fields, returning a new field set.
+ * Overwrites lead* + missionSnapshot; preserves follow-up state. When the user
+ * hasn't sent yet, advances `followUpStatus` from "new" to "drafted" once an
+ * outreach-worthy lead exists so the UI can reflect "needs follow-up".
+ */
+export function applyLeadFields(
+  fields: ScanMemoryFields,
+  score: {
+    priority: string;
+    score: number;
+    reasons: string[];
+    nextAction: string;
+  },
+  snapshot: MissionSnapshot | null,
+): ScanMemoryFields {
+  return {
+    ...fields,
+    leadPriority: score.priority,
+    leadScore: score.score,
+    leadReasons: score.reasons,
+    nextAction: score.nextAction,
+    missionSnapshot: snapshot ?? fields.missionSnapshot,
   };
 }

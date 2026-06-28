@@ -153,6 +153,48 @@ export const outreachDraftValidator = v.object({
   generatedAt: v.number(),
 });
 
+// ---------------------------------------------------------------------------
+// Mission ("Today's Goal") + lead scoring.
+// ---------------------------------------------------------------------------
+
+/** The portable mission core (no storage id/clientId). */
+export const missionCoreValidator = v.object({
+  rawText: v.string(),
+  goalType: v.string(),
+  targetRoles: v.array(v.string()),
+  targetKeywords: v.array(v.string()),
+  targetCompanies: v.array(v.string()),
+  targetIndustries: v.array(v.string()),
+  preferredAction: v.string(),
+  userContext: v.optional(v.union(v.string(), v.null())),
+  tone: v.string(),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+/** Public MissionProfile returned to iOS (core + optional storage ids). */
+export const missionProfileValidator = v.object({
+  id: v.optional(v.union(v.string(), v.null())),
+  clientId: v.optional(v.union(v.string(), v.null())),
+  ...missionCoreValidator.fields,
+});
+
+/** Compact mission snapshot stored on a scored memory (for display context). */
+export const missionSnapshotValidator = v.object({
+  goalType: v.string(),
+  rawText: v.string(),
+});
+
+/** Validator for a computed LeadScore. */
+export const leadScoreValidator = v.object({
+  priority: v.string(),
+  score: v.number(),
+  reasons: v.array(v.string()),
+  nextAction: v.string(),
+  missingInfo: v.array(v.string()),
+  scoredAt: v.number(),
+});
+
 /**
  * Validator for a public scan memory returned to iOS. `id` is the Convex
  * document id as a string. Dedup keys are NOT exposed. Metadata/links/scores
@@ -178,6 +220,17 @@ export const scanMemoryValidator = v.object({
   firstScannedAt: v.number(),
   lastScannedAt: v.number(),
   scanCount: v.number(),
+  // Mission-driven lead scoring (always present in the public projection;
+  // older rows default to new/empty via the projection, never crash).
+  clientId: v.optional(v.union(v.string(), v.null())),
+  leadPriority: v.optional(v.union(v.string(), v.null())),
+  leadScore: v.optional(v.union(v.number(), v.null())),
+  leadReasons: v.array(v.string()),
+  nextAction: v.optional(v.union(v.string(), v.null())),
+  followUpStatus: v.string(),
+  sentAt: v.optional(v.union(v.number(), v.null())),
+  editedOutreach: v.optional(v.union(outreachDraftValidator, v.null())),
+  missionSnapshot: v.optional(v.union(missionSnapshotValidator, v.null())),
 });
 
 /** Validator for IdentityResolveResult (response of /api/identity/resolve). */

@@ -30,11 +30,15 @@ import {
   jsonResponse,
   optionsResponse,
   parseFilterRequest,
+  parseFollowUpStatusRequest,
   parseIdentityResolveRequest,
   parseInterpretRequest,
   parseMatchFaceRequest,
+  parseMissionCurrentRequest,
+  parseMissionParseRequest,
   parseOpenerRequest,
   parseScanMemoryUpsertRequest,
+  parseScoreRequest,
   parseUpdateNotesRequest,
   parseGenerateOutreachRequest,
   sanitizeMatchResult,
@@ -165,11 +169,34 @@ route(
   jsonAction(async (ctx) => ctx.runAction(api.voice.getDeepgramToken, {})),
 );
 
-// --- GET /api/brain/memories  -> ScanMemory[] -------------------------------
+// --- GET /api/brain/memories[?clientId=...]  -> ScanMemory[] ----------------
 route(
   "/api/brain/memories",
   "GET",
-  jsonAction(async (ctx) => ctx.runQuery(api.scanMemories.list, {})),
+  jsonAction(async (ctx, request) => {
+    const clientId = new URL(request.url).searchParams.get("clientId");
+    return ctx.runQuery(api.scanMemories.list, { clientId: clientId ?? null });
+  }),
+);
+
+// --- POST /api/mission/parse  -> MissionProfile -----------------------------
+route(
+  "/api/mission/parse",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseMissionParseRequest(await readJsonBody(request));
+    return ctx.runAction(api.mission.parse, args);
+  }),
+);
+
+// --- POST /api/mission/current  -> MissionProfile | null --------------------
+route(
+  "/api/mission/current",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseMissionCurrentRequest(await readJsonBody(request));
+    return ctx.runQuery(api.mission.current, args);
+  }),
 );
 
 // --- POST /api/brain/memories/upsert  -> ScanMemory -------------------------
@@ -189,6 +216,26 @@ route(
   jsonAction(async (ctx, request) => {
     const args = parseUpdateNotesRequest(await readJsonBody(request));
     return ctx.runMutation(api.scanMemories.updateNotes, args);
+  }),
+);
+
+// --- POST /api/brain/memories/score  -> ScanMemory | null -------------------
+route(
+  "/api/brain/memories/score",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseScoreRequest(await readJsonBody(request));
+    return ctx.runMutation(api.scanMemories.score, args);
+  }),
+);
+
+// --- POST /api/brain/memories/follow-up-status  -> ScanMemory | null --------
+route(
+  "/api/brain/memories/follow-up-status",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseFollowUpStatusRequest(await readJsonBody(request));
+    return ctx.runMutation(api.scanMemories.updateFollowUpStatus, args);
   }),
 );
 
