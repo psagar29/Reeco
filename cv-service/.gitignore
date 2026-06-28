@@ -1,0 +1,16 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+
+# Server logs / local artifacts
+*.log
+server.out.log
+server.err.log
+_sample_face.jpg
+
+# InsightFace model cache (downloaded at runtime, not vendored)
+models/
