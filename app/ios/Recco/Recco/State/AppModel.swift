@@ -39,6 +39,18 @@ final class AppModel {
     /// Non-fatal status line for the transcript ribbon.
     private(set) var statusMessage: String?
 
+    // MARK: - Identity resolution ("find info on him")
+
+    /// Latest identity result (drives the identity sheet). nil until resolved.
+    private(set) var identityResult: IdentityResolveResultDTO?
+    /// True while an identity resolution is in flight (drives the ribbon).
+    private(set) var isResolvingIdentity = false
+    /// Phase line shown in the ribbon during resolution.
+    private(set) var identityStatusMessage: String?
+    /// Installed by `CameraViewModel.onAppear` so the command bar can trigger a
+    /// capture from the live pixel buffer the camera owns. Cleared on disappear.
+    @ObservationIgnored var identityCaptureHandler: ((String) async -> Void)?
+
     // MARK: - Backend
 
     private var backend: ReccoBackend
@@ -174,6 +186,12 @@ final class AppModel {
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        // 0. Identity lane intercepts before the filter parser.
+        if isIdentityCommand(text) {
+            await runIdentityCommand(text)
+            return
+        }
+
         // 1. Partial transcript immediately.
         state.lastTranscript = text
         state.isThinking = true
@@ -301,6 +319,85 @@ final class AppModel {
 
     func clearDraft() {
         draft = nil
+    }
+
+    // MARK: - Identity resolution ("find info on him")
+
+    /// Phrases that route to the identity lane instead of the filter parser.
+    private static let identityPhrases = [
+        "find info", "who is he", "who is she", "who is this",
+        "find info on this person", "who's that", "who is that",
+        "get his linkedin", "get her linkedin", "his linkedin", "her linkedin",
+        "look him up", "look her up", "find out who",
+    ]
+
+    /// True when a transcript should trigger "find info on him".
+    func isIdentityCommand(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return AppModel.identityPhrases.contains { lower.contains($0) }
+    }
+
+    /// Entry point for the identity lane. Delegates the capture to the camera
+    /// (which owns the live pixel buffer); falls back to a handler-less resolve
+    /// with empty crops when no camera is mounted (so typed commands still work).
+    func runIdentityCommand(_ transcript: String) async {
+        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        state.lastTranscript = text
+        state.updatedAt = now()
+        isResolvingIdentity = true
+        identityResult = nil
+        identityStatusMessage = "Locking target…"
+
+        if let handler = identityCaptureHandler {
+            await handler(text)
+        } else {
+            await resolveIdentity(
+                transcript: text, trackId: "manual",
+                faceImageBase64: "", contextImageBase64: ""
+            )
+        }
+    }
+
+    /// Update the phase line the ribbon shows while the camera does its work.
+    func setIdentityPhase(_ message: String) {
+        identityStatusMessage = message
+    }
+
+    /// Run the captured crops through the backend identity lane and publish the
+    /// result. Called by CameraViewModel (with real crops) or directly.
+    func resolveIdentity(
+        transcript: String,
+        trackId: String,
+        faceImageBase64: String,
+        contextImageBase64: String
+    ) async {
+        isResolvingIdentity = true
+        if identityStatusMessage == nil || identityStatusMessage == "Locking target…" {
+            identityStatusMessage = "Reading badge · searching · verifying…"
+        }
+        do {
+            let result = try await backend.resolveIdentity(
+                transcript: transcript, trackId: trackId,
+                faceImageBase64: faceImageBase64, contextImageBase64: contextImageBase64
+            )
+            identityResult = result
+            identityStatusMessage = result.message ?? result.confidenceLabel
+        } catch {
+            identityResult = IdentityResolveResultDTO(
+                trackId: trackId, status: .error,
+                message: error.localizedDescription
+            )
+            identityStatusMessage = "Couldn't resolve: \(error.localizedDescription)"
+        }
+        isResolvingIdentity = false
+        state.updatedAt = now()
+    }
+
+    /// Dismiss the identity result sheet.
+    func clearIdentity() {
+        identityResult = nil
+        identityStatusMessage = nil
     }
 
     // MARK: - Helpers

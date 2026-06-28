@@ -98,3 +98,62 @@ export const draftResultValidator = v.object({
   email: v.optional(v.union(v.string(), v.null())),
   generatedAt: v.number(),
 });
+
+// ---------------------------------------------------------------------------
+// Identity resolution ("find info on him").
+// ---------------------------------------------------------------------------
+
+/** Validator for IdentityClue. */
+export const identityClueValidator = v.object({
+  rawText: v.string(),
+  fullName: v.optional(v.union(v.string(), v.null())),
+  company: v.optional(v.union(v.string(), v.null())),
+  role: v.optional(v.union(v.string(), v.null())),
+  school: v.optional(v.union(v.string(), v.null())),
+  confidence: v.number(),
+  evidence: v.optional(v.union(v.string(), v.null())),
+});
+
+/** Validator for IdentityCandidate. */
+export const identityCandidateValidator = v.object({
+  candidateId: v.string(),
+  fullName: v.string(),
+  headline: v.optional(v.union(v.string(), v.null())),
+  role: v.optional(v.union(v.string(), v.null())),
+  company: v.optional(v.union(v.string(), v.null())),
+  school: v.optional(v.union(v.string(), v.null())),
+  location: v.optional(v.union(v.string(), v.null())),
+  linkedinUrl: v.optional(v.union(v.string(), v.null())),
+  email: v.optional(v.union(v.string(), v.null())),
+  profilePhotoUrl: v.optional(v.union(v.string(), v.null())),
+  source: v.string(),
+  matchScore: v.number(),
+});
+
+/** Validator for FaceVerification. */
+export const faceVerificationValidator = v.object({
+  candidateId: v.string(),
+  verified: v.boolean(),
+  score: v.optional(v.union(v.number(), v.null())),
+  threshold: v.number(),
+  faceDetected: v.boolean(),
+  message: v.optional(v.union(v.string(), v.null())),
+});
+
+/** Validator for IdentityResolveResult (response of /api/identity/resolve). */
+export const identityResolveResultValidator = v.object({
+  trackId: v.string(),
+  status: v.union(
+    v.literal("verified"),
+    v.literal("possible"),
+    v.literal("not_found"),
+    v.literal("needs_clarification"),
+    v.literal("error"),
+  ),
+  clue: v.optional(v.union(identityClueValidator, v.null())),
+  candidates: v.array(identityCandidateValidator),
+  bestCandidate: v.optional(v.union(identityCandidateValidator, v.null())),
+  verification: v.optional(v.union(faceVerificationValidator, v.null())),
+  message: v.optional(v.union(v.string(), v.null())),
+  latencyMs: v.optional(v.union(v.number(), v.null())),
+});

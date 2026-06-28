@@ -1,0 +1,229 @@
+import Foundation
+import AVFoundation
+
+/// Streaming speech-to-text via Deepgram.
+///
+/// Captures mic audio with `AVAudioEngine`, converts it to 16 kHz linear-16 PCM,
+/// streams it to Deepgram's realtime WebSocket, and surfaces partial + final
+/// transcripts. The Deepgram key NEVER lives on-device: we mint a short-lived
+/// token from Person B's backend (`POST /api/voice/deepgram-token` ->
+/// `voice:getDeepgramToken`).
+///
+/// This is an intentionally clean, OPTIONAL path. The app's primary command
+/// entry is typed / quick-pick ("find info on him"); voice can be layered on by
+/// calling `start(onTranscript:onError:)`. If the backend returns a stub token
+/// (no key configured) or the socket fails, `start` reports `.notConfigured`
+/// via `onError` and the caller keeps the typed fallback. Nothing else in the
+/// app depends on this type, so it stays decoupled.
+///
+/// NOTE: streaming requires `NSMicrophoneUsageDescription` in Info.plist.
+final class DeepgramSpeechClient {
+
+    enum DeepgramError: LocalizedError {
+        case notConfigured
+        case audioSessionFailed(String)
+        case socketFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .notConfigured: return "Deepgram is not configured (stub token)."
+            case .audioSessionFailed(let m): return "Microphone setup failed: \(m)"
+            case .socketFailed(let m): return "Deepgram connection failed: \(m)"
+            }
+        }
+    }
+
+    /// Endpoint that mints a streaming token (Convex HTTP base + the voice route).
+    private let tokenEndpoint: URL?
+    private let sampleRate: Double = 16000
+
+    private let engine = AVAudioEngine()
+    private var socket: URLSessionWebSocketTask?
+    private var converter: AVAudioConverter?
+    private var isRunning = false
+
+    private var onTranscript: ((String, Bool) -> Void)?
+    private var onError: ((Error) -> Void)?
+
+    init(tokenEndpoint: URL?) {
+        self.tokenEndpoint = tokenEndpoint
+    }
+
+    /// Begin streaming. `onTranscript(text, isFinal)` fires as results arrive;
+    /// callbacks are delivered on the main queue.
+    func start(
+        onTranscript: @escaping (String, Bool) -> Void,
+        onError: @escaping (Error) -> Void
+    ) async {
+        guard !isRunning else { return }
+        self.onTranscript = onTranscript
+        self.onError = onError
+        do {
+            let token = try await fetchToken()
+            try configureAudioSession()
+            try openSocket(token: token)
+            try startEngine()
+            isRunning = true
+        } catch {
+            emitError(error)
+            stop()
+        }
+    }
+
+    func stop() {
+        isRunning = false
+        engine.inputNode.removeTap(onBus: 0)
+        if engine.isRunning { engine.stop() }
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
+        try? AVAudioSession.sharedInstance().setActive(
+            false, options: [.notifyOthersOnDeactivation])
+    }
+
+    // MARK: - Token
+
+    private struct DeepgramTokenDTO: Codable {
+        let temporaryToken: String
+        let expiresAt: Double
+    }
+
+    private func fetchToken() async throws -> String {
+        guard let endpoint = tokenEndpoint else { throw DeepgramError.notConfigured }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let token = try JSONDecoder().decode(DeepgramTokenDTO.self, from: data)
+        // The backend returns a clearly-marked stub when no key is configured.
+        guard !token.temporaryToken.hasPrefix("stub-") else {
+            throw DeepgramError.notConfigured
+        }
+        return token.temporaryToken
+    }
+
+    // MARK: - Audio capture
+
+    private func configureAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, mode: .measurement,
+                                    options: [.duckOthers, .defaultToSpeaker])
+            try session.setActive(true, options: [])
+        } catch {
+            throw DeepgramError.audioSessionFailed(error.localizedDescription)
+        }
+    }
+
+    private func startEngine() throws {
+        let input = engine.inputNode
+        let inputFormat = input.outputFormat(forBus: 0)
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw DeepgramError.audioSessionFailed("could not build target format")
+        }
+        converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+
+        input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { [weak self] buffer, _ in
+            self?.streamBuffer(buffer, to: targetFormat)
+        }
+        engine.prepare()
+        try engine.start()
+    }
+
+    /// Convert one captured buffer to the target format and send it. Runs on the
+    /// realtime audio thread; `converter`/`socket` are set up before the engine
+    /// starts and not mutated afterward.
+    private func streamBuffer(_ buffer: AVAudioPCMBuffer, to targetFormat: AVAudioFormat) {
+        guard let converter, let socket else { return }
+        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1024)
+        guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
+            return
+        }
+        var consumed = false
+        var convError: NSError?
+        converter.convert(to: out, error: &convError) { _, status in
+            if consumed {
+                status.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard convError == nil, let data = pcmData(from: out), !data.isEmpty else { return }
+        socket.send(.data(data)) { _ in }
+    }
+
+    private func pcmData(from buffer: AVAudioPCMBuffer) -> Data? {
+        guard let channel = buffer.int16ChannelData else { return nil }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return nil }
+        return Data(bytes: channel[0], count: frames * MemoryLayout<Int16>.size)
+    }
+
+    // MARK: - WebSocket
+
+    private func openSocket(token: String) throws {
+        var components = URLComponents(string: "wss://api.deepgram.com/v1/listen")
+        components?.queryItems = [
+            URLQueryItem(name: "encoding", value: "linear16"),
+            URLQueryItem(name: "sample_rate", value: String(Int(sampleRate))),
+            URLQueryItem(name: "channels", value: "1"),
+            URLQueryItem(name: "punctuate", value: "true"),
+            URLQueryItem(name: "interim_results", value: "true"),
+        ]
+        guard let url = components?.url else { throw DeepgramError.socketFailed("bad URL") }
+        var request = URLRequest(url: url)
+        request.setValue("Token \(token)", forHTTPHeaderField: "Authorization")
+        let task = URLSession.shared.webSocketTask(with: request)
+        socket = task
+        task.resume()
+        receive()
+    }
+
+    private func receive() {
+        socket?.receive { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error):
+                self.emitError(DeepgramError.socketFailed(error.localizedDescription))
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    self.handleMessage(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        self.handleMessage(text)
+                    }
+                @unknown default:
+                    break
+                }
+                if self.isRunning { self.receive() }
+            }
+        }
+    }
+
+    private func handleMessage(_ text: String) {
+        guard
+            let data = text.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let channel = json["channel"] as? [String: Any],
+            let alternatives = channel["alternatives"] as? [[String: Any]],
+            let transcript = alternatives.first?["transcript"] as? String,
+            !transcript.isEmpty
+        else { return }
+        let isFinal = (json["is_final"] as? Bool) ?? false
+        let callback = onTranscript
+        DispatchQueue.main.async { callback?(transcript, isFinal) }
+    }
+
+    private func emitError(_ error: Error) {
+        let callback = onError
+        DispatchQueue.main.async { callback?(error) }
+    }
+}

@@ -10,6 +10,7 @@
 
 import type * as drafts from "../drafts.js";
 import type * as http from "../http.js";
+import type * as identity from "../identity.js";
 import type * as lib_config from "../lib/config.js";
 import type * as lib_cv from "../lib/cv.js";
 import type * as lib_demoRoster from "../lib/demoRoster.js";
@@ -38,6 +39,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   drafts: typeof drafts;
   http: typeof http;
+  identity: typeof identity;
   "lib/config": typeof lib_config;
   "lib/cv": typeof lib_cv;
   "lib/demoRoster": typeof lib_demoRoster;

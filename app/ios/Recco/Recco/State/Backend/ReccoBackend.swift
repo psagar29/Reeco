@@ -17,6 +17,19 @@ protocol ReccoBackend: Sendable {
     /// Face recognition for a captured crop (`vision:matchFace`). Person C's
     /// camera layer calls this; included here so the seam is defined.
     func matchFace(imageBase64: String, imageMimeType: String, trackId: String) async throws -> FaceMatchResultDTO
+
+    /// Resolve the identity of a locked target — "find info on him". Reads the
+    /// badge (OpenAI Vision), finds candidates (Fiber), and face-verifies them
+    /// (CV service), all server-side. `POST /api/identity/resolve` ->
+    /// `identity:resolveTarget`. The two crops are: a tight face crop (for
+    /// verification) and a wider person/badge crop (for OCR). Both are base64
+    /// JPEG and may be empty in `mockAll`.
+    func resolveIdentity(
+        transcript: String,
+        trackId: String,
+        faceImageBase64: String,
+        contextImageBase64: String
+    ) async throws -> IdentityResolveResultDTO
 }
 
 enum BackendError: LocalizedError {

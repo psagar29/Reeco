@@ -44,3 +44,52 @@ export function getOpenAiConfig(env: EnvBag = process.env): {
 export function getDeepgramApiKey(env: EnvBag = process.env): string {
   return (env.DEEPGRAM_API_KEY ?? "").trim();
 }
+
+// ---------------------------------------------------------------------------
+// Identity resolution ("find info on him") config.
+// ---------------------------------------------------------------------------
+
+/** Defaults for the identity thresholds, also reused in tests. */
+export const DEFAULT_IDENTITY_MIN_OCR_CONFIDENCE = 0.45;
+/**
+ * Cosine-similarity floor for declaring a candidate's profile photo a match
+ * for the live face. Slightly below FACE_STRONG_MATCH_SCORE (0.38) because the
+ * profile photo and live frame differ in lighting/angle; still conservative
+ * enough that we never label someone "verified" on a weak match.
+ */
+export const DEFAULT_IDENTITY_FACE_VERIFY_THRESHOLD = 0.32;
+
+/** Fiber AI lookup credentials + base URL. */
+export function getFiberConfig(env: EnvBag = process.env): {
+  apiKey: string;
+  baseUrl: string;
+} {
+  const baseUrl = (env.FIBER_API_BASE_URL ?? "").trim() || "https://api.fiber.ai";
+  return {
+    apiKey: (env.FIBER_API_KEY ?? "").trim(),
+    // Normalize: drop any trailing slashes so callers can append "/v1/...".
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+  };
+}
+
+/** OpenAI vision model used to read badges/name tags (OCR + extraction). */
+export function getOpenAiVisionModel(env: EnvBag = process.env): string {
+  return (env.OPENAI_VISION_MODEL ?? "gpt-4o").trim() || "gpt-4o";
+}
+
+/** Identity-resolution thresholds (OCR confidence floor + face-verify floor). */
+export function getIdentityThresholds(env: EnvBag = process.env): {
+  minOcrConfidence: number;
+  faceVerifyThreshold: number;
+} {
+  return {
+    minOcrConfidence: num(
+      env.IDENTITY_MIN_OCR_CONFIDENCE,
+      DEFAULT_IDENTITY_MIN_OCR_CONFIDENCE,
+    ),
+    faceVerifyThreshold: num(
+      env.IDENTITY_FACE_VERIFY_THRESHOLD,
+      DEFAULT_IDENTITY_FACE_VERIFY_THRESHOLD,
+    ),
+  };
+}

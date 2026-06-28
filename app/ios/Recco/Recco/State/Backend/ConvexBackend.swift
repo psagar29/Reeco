@@ -67,6 +67,35 @@ final class ConvexBackend: ReccoBackend {
         return try await post("/api/vision/match-face", body: body, as: FaceMatchResultDTO.self)
     }
 
+    func resolveIdentity(
+        transcript: String,
+        trackId: String,
+        faceImageBase64: String,
+        contextImageBase64: String
+    ) async throws -> IdentityResolveResultDTO {
+        // Identity is the one lane that must NOT fall back to the offline mock on
+        // failure: the mock can't actually face-verify, and surfacing a
+        // fabricated "Verified" identity for an unrelated person would break the
+        // safety invariant. With no backend we return an honest `.error`; a real
+        // HTTP failure throws `ConvexBackendError`, which `AppModel` maps to
+        // `.error`. A successful but degraded status (not_found /
+        // needs_clarification) is passed through unchanged.
+        guard hasBackend else {
+            return IdentityResolveResultDTO(
+                trackId: trackId, status: .error,
+                message: "Identity service not configured (set RECCO_API_BASE_URL)."
+            )
+        }
+        let body = IdentityResolveRequest(
+            trackId: trackId,
+            transcript: transcript,
+            faceImageBase64: faceImageBase64,
+            contextImageBase64: contextImageBase64,
+            imageMimeType: "image/jpeg"
+        )
+        return try await post("/api/identity/resolve", body: body, as: IdentityResolveResultDTO.self)
+    }
+
     // MARK: - HTTP helpers
 
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
@@ -150,6 +179,14 @@ final class ConvexBackend: ReccoBackend {
         let imageBase64: String
         let imageMimeType: String
         let trackId: String
+    }
+
+    private struct IdentityResolveRequest: Encodable {
+        let trackId: String
+        let transcript: String
+        let faceImageBase64: String
+        let contextImageBase64: String
+        let imageMimeType: String
     }
 }
 

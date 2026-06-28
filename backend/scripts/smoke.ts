@@ -16,6 +16,17 @@ import { matchBest, toFaceMatchResult, DEFAULT_THRESHOLDS } from "../convex/lib/
 import { applyFilter, emptyBrainState } from "../convex/lib/filter.js";
 import { parseCommandOffline } from "../convex/lib/voiceParser.js";
 import { buildOpenerOffline } from "../convex/lib/opener.js";
+import { sanitizeClue } from "../convex/lib/openaiVision.js";
+import { parseFiberPeople } from "../convex/lib/fiber.js";
+import {
+  combineScores,
+  decideStatus,
+  pickBest,
+} from "../convex/lib/identityScoring.js";
+import type {
+  FaceVerification,
+  IdentityResolveResult,
+} from "../convex/lib/types.js";
 
 const FIXED_NOW = 1782522000000;
 
@@ -115,5 +126,77 @@ show("voice:getDeepgramToken", {
   temporaryToken: "stub-deepgram-token-no-key-configured",
   expiresAt: FIXED_NOW + 60_000,
 });
+
+// --- identity:resolveTarget  (pure scoring path, offline). ------------------
+header("identity:resolveTarget  (find info on him — offline scoring path)");
+
+// 1. OpenAI Vision would return this; sanitizeClue makes it safe.
+const clue = sanitizeClue({
+  rawText: "ADA LOVELACE | Analytical Engines | Lead Engineer",
+  fullName: "Ada Lovelace",
+  company: "Analytical Engines",
+  role: "Lead Engineer",
+  confidence: 0.86,
+  evidence: "badge name line",
+});
+show("OpenAI Vision clue (sanitized)", clue);
+
+// 2. Fiber would return candidate profiles; parseFiberPeople normalizes them.
+const candidates = parseFiberPeople({
+  profiles: [
+    {
+      name: "Ada Lovelace",
+      linkedin_url: "https://linkedin.com/in/ada-lovelace",
+      title: "Lead Engineer",
+      company: "Analytical Engines",
+      profilePicUrl: "https://example.com/ada.jpg",
+    },
+    {
+      name: "Ada Byron",
+      linkedin_url: "https://linkedin.com/in/ada-byron",
+      title: "Mathematician",
+      company: "Royal Society",
+    },
+  ],
+});
+
+// 3. Face verification (here: the top candidate's photo confirms the live face).
+const verification: FaceVerification = {
+  candidateId: candidates[0]!.candidateId,
+  verified: true,
+  score: 0.51,
+  threshold: 0.32,
+  faceDetected: true,
+  message: null,
+};
+for (const c of candidates) {
+  const v = c.candidateId === verification.candidateId ? verification : null;
+  c.matchScore = combineScores({ clue, candidate: c, verification: v });
+}
+candidates.sort((a, b) => b.matchScore - a.matchScore);
+const bestCandidate = pickBest(candidates);
+const status = decideStatus({
+  clue,
+  best: bestCandidate,
+  verification,
+  hadCandidates: true,
+  minOcrConfidence: 0.45,
+});
+const identityResult: IdentityResolveResult = {
+  trackId: "track_demo_1",
+  status,
+  clue,
+  candidates,
+  bestCandidate,
+  verification,
+  message: `Verified ${bestCandidate?.fullName} · ${bestCandidate?.company}.`,
+  latencyMs: 0,
+};
+show("identity:resolveTarget", identityResult);
+console.log(
+  status === "verified"
+    ? `  OK: ${bestCandidate?.fullName} verified (face score ${verification.score}).`
+    : `  status=${status}`,
+);
 
 header("SMOKE TEST COMPLETE — all functions produced contract-shaped output.");

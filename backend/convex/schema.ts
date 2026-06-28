@@ -1,10 +1,12 @@
 /**
  * Convex schema for the Recco backend.
  *
- *   people     - the enrolled demo roster (+ server-side face embeddings)
- *   appState   - the single reactive BrainState the iOS app subscribes to
- *   faceMatches- append-only log of match attempts (debugging / analytics)
- *   drafts     - generated openers (history; latest wins on read)
+ *   people         - the enrolled demo roster (+ server-side face embeddings)
+ *   appState       - the single reactive BrainState the iOS app subscribes to
+ *   faceMatches    - append-only log of match attempts (debugging / analytics)
+ *   drafts         - generated openers (history; latest wins on read)
+ *   identityLookups- append-only debug log of "find info on him" resolutions
+ *                    (extracted text + scores only; NEVER raw images)
  */
 
 import { defineSchema, defineTable } from "convex/server";
@@ -54,6 +56,26 @@ export default defineSchema({
     source: v.optional(v.string()),
     generatedAt: v.number(),
   }).index("by_personId", ["personId"]),
+
+  // Debug log for identity resolution. Stores only extracted text + scores so
+  // a demo can be inspected after the fact; raw face/badge images are NEVER
+  // persisted.
+  identityLookups: defineTable({
+    trackId: v.string(),
+    status: v.string(),
+    transcript: v.optional(v.union(v.string(), v.null())),
+    clueName: v.optional(v.union(v.string(), v.null())),
+    clueCompany: v.optional(v.union(v.string(), v.null())),
+    ocrConfidence: v.optional(v.union(v.number(), v.null())),
+    candidateCount: v.number(),
+    selectedCandidateId: v.optional(v.union(v.string(), v.null())),
+    selectedName: v.optional(v.union(v.string(), v.null())),
+    selectedLinkedin: v.optional(v.union(v.string(), v.null())),
+    verificationScore: v.optional(v.union(v.number(), v.null())),
+    verified: v.optional(v.union(v.boolean(), v.null())),
+    latencyMs: v.optional(v.union(v.number(), v.null())),
+    createdAt: v.number(),
+  }).index("by_trackId", ["trackId"]),
 });
 
 // Re-export so callers can build args that match the stored filter shape.

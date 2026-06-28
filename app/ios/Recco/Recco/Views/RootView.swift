@@ -50,6 +50,17 @@ struct RootView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.ultraThinMaterial)
         }
+        // "Find info on him" result.
+        .sheet(item: Binding(
+            get: { appModel.identityResult },
+            set: { if $0 == nil { appModel.clearIdentity() } }
+        )) { result in
+            IdentityResultSheet(result: result)
+                .environment(appModel)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.ultraThinMaterial)
+        }
     }
 }
 

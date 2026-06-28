@@ -9,8 +9,10 @@ struct CommandBarView: View {
     @Environment(AppModel.self) private var appModel
     @FocusState private var focused: Bool
 
-    /// The supported demo commands, exactly as in the Person D brief.
+    /// The supported demo commands, exactly as in the Person D brief, plus the
+    /// identity lane ("find info on him").
     private let examples = [
+        "Find info on him.",
         "Show me AI founders.",
         "Who should I talk to about infra?",
         "Only growth people.",

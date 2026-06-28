@@ -52,4 +52,67 @@ final class MockBackend: ReccoBackend {
             latencyMs: 200
         )
     }
+
+    func resolveIdentity(
+        transcript: String,
+        trackId: String,
+        faceImageBase64: String,
+        contextImageBase64: String
+    ) async throws -> IdentityResolveResultDTO {
+        // Deterministic demo identity: hash the trackId onto a roster person and
+        // present a fully-formed candidate so the demo shows the complete flow
+        // with no backend. CRITICAL: mock mode has no real CV, so we return
+        // `.possible` (never `.verified`) — the app must never claim a verified
+        // face match without a real CV embedding (the live path on a device
+        // returns `.verified`).
+        try? await Task.sleep(for: latency)
+        guard !people.isEmpty else {
+            return IdentityResolveResultDTO(
+                trackId: trackId,
+                status: .notFound,
+                message: "No roster loaded."
+            )
+        }
+        let index = abs(trackId.hashValue) % people.count
+        let person = people[index]
+        let candidate = IdentityCandidateDTO(
+            candidateId: "cand_mock_\(person.id)",
+            fullName: person.name,
+            headline: "\(person.role) at \(person.company)",
+            role: person.role,
+            company: person.company,
+            location: nil,
+            linkedinUrl: person.links.linkedin,
+            email: nil,
+            profilePhotoUrl: person.avatarUrl,
+            source: "mock",
+            matchScore: 0.62
+        )
+        let verification = FaceVerificationDTO(
+            candidateId: candidate.candidateId,
+            verified: false,
+            score: nil,
+            threshold: 0.32,
+            faceDetected: false,
+            message: "Mock mode: CV unavailable — face not verified."
+        )
+        let clue = IdentityClueDTO(
+            rawText: "\(person.name) · \(person.company)",
+            fullName: person.name,
+            company: person.company,
+            role: person.role,
+            confidence: 0.88,
+            evidence: "demo badge"
+        )
+        return IdentityResolveResultDTO(
+            trackId: trackId,
+            status: .possible,
+            clue: clue,
+            candidates: [candidate],
+            bestCandidate: candidate,
+            verification: verification,
+            message: "Possible match (demo): \(person.name) · \(person.company). Face not verified in mock mode.",
+            latencyMs: 200
+        )
+    }
 }

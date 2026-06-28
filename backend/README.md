@@ -294,6 +294,11 @@ deployment instead with `npx convex env set NAME value` (Convex actions read
 | `DEEPGRAM_API_KEY` | — | `voice:getDeepgramToken` mints a real short-lived token | clearly-marked **stub** token |
 | `FACE_STRONG_MATCH_SCORE` | `0.38` | strong-match cosine threshold | default |
 | `FACE_TENTATIVE_MATCH_SCORE` | `0.30` | tentative-match cosine threshold | default |
+| `FIBER_API_KEY` | — | `identity:resolveTarget` calls Fiber AI person lookup | identity lane returns `not_found` |
+| `FIBER_API_BASE_URL` | `https://api.fiber.ai` | Fiber base URL (no trailing slash) | default |
+| `OPENAI_VISION_MODEL` | `gpt-4o` | vision model that reads the badge (reuses `OPENAI_API_KEY`) | identity lane returns `needs_clarification` |
+| `IDENTITY_MIN_OCR_CONFIDENCE` | `0.45` | OCR confidence floor below which → `needs_clarification` | default |
+| `IDENTITY_FACE_VERIFY_THRESHOLD` | `0.32` | cosine floor to mark a candidate face-`verified` (only when CV is real) | default |
 
 ### Exact commands to enable the "real" paths
 

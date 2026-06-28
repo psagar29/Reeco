@@ -39,9 +39,13 @@ final class CameraViewModel {
     private let session = CameraSession()
     private let tracker = FaceTracker()
     private let cropper = FaceCropper()
+    private let imageCropper = ImageCropper()
     private let policy = RecognitionPolicy()
     private let mockClient: MockRecognitionClient
     private let backendClient: BackendRecognitionClient
+
+    /// Explicitly locked identity target (set by a tap); nil = auto (center face).
+    private(set) var targetTrackId: String?
 
     private var latestPixelBuffer: CVPixelBuffer?
     private var lastProcessTime: TimeInterval = 0
@@ -67,6 +71,12 @@ final class CameraViewModel {
         mockClient.people = appModel.people    // roster may have loaded after init
         authState = session.authState
 
+        // Let the command bar trigger "find info on him" from the live pixel
+        // buffer this view model owns.
+        appModel.identityCaptureHandler = { [weak self] transcript in
+            await self?.resolveTargetIdentity(transcript)
+        }
+
         #if targetEnvironment(simulator)
         startSimulated()
         #else
@@ -88,6 +98,7 @@ final class CameraViewModel {
     func onDisappear() {
         simTask?.cancel()
         session.stop()
+        appModel.identityCaptureHandler = nil
     }
 
     func flipCamera() {
@@ -199,6 +210,95 @@ final class CameraViewModel {
             return
         }
         requestRecognition(for: primary, pixelBuffer: latestPixelBuffer)
+    }
+
+    // MARK: - Identity target ("find info on him")
+
+    /// Explicitly lock a track as the identity target (e.g. from a tap). Pass
+    /// nil to return to automatic (center-face) selection.
+    func selectTarget(_ trackId: String?) {
+        targetTrackId = trackId
+    }
+
+    /// Pick the identity target: an explicitly selected track if it is still on
+    /// screen, else the face nearest the screen center, tie-broken by largest
+    /// area. `observations` use a normalized top-left (0...1) coordinate space.
+    func chooseTargetObservation() -> FaceObservation? {
+        guard !observations.isEmpty else { return nil }
+        if let id = targetTrackId, let selected = observations.first(where: { $0.trackId == id }) {
+            return selected
+        }
+        // Rank by an independent composite key so the comparison is a true total
+        // order (a pairwise "within 0.04" tie-break is intransitive and would
+        // make the winner depend on array order with 3+ near-center faces).
+        // Bucket centeredness into 0.04 bands, then prefer the larger face.
+        func key(_ o: FaceObservation) -> (Int, CGFloat) {
+            (Int((distanceToCenter(o) / 0.04).rounded(.down)), -area(o))
+        }
+        return observations.min { a, b in
+            let ka = key(a), kb = key(b)
+            return ka.0 != kb.0 ? ka.0 < kb.0 : ka.1 < kb.1
+        }
+    }
+
+    private func distanceToCenter(_ o: FaceObservation) -> CGFloat {
+        let dx = o.center.x - 0.5
+        let dy = o.center.y - 0.5
+        return (dx * dx + dy * dy).squareRoot()
+    }
+
+    private func area(_ o: FaceObservation) -> CGFloat { o.rect.width * o.rect.height }
+
+    /// A wider crop than the face box: widen around the face and extend downward
+    /// to include the chest / lanyard / name-tag. Coordinates are top-left, so
+    /// "down" is increasing y. Result is clamped to the unit square.
+    private func contextRect(for face: FaceObservation) -> CGRect {
+        let f = face.rect
+        let width = min(1.0, f.width * 2.6)
+        let x = max(0, f.midX - width / 2)
+        let top = max(0, f.minY - f.height * 0.2)
+        let bottom = min(1.0, f.maxY + f.height * 2.4)
+        return CGRect(x: x, y: top, width: min(width, 1.0 - x), height: bottom - top)
+    }
+
+    /// Capture the locked target's two crops (tight face + wider badge) and run
+    /// them through the backend identity lane. Invoked via the AppModel capture
+    /// handler when the user says/types "find info on him". In `mockAll` (or with
+    /// no pixel buffer) the crops are empty and the mock backend returns a demo
+    /// identity, so the flow is always demoable.
+    func resolveTargetIdentity(_ transcript: String) async {
+        guard let target = chooseTargetObservation() else {
+            appModel.setIdentityPhase("No one in frame — point the camera at someone.")
+            await appModel.resolveIdentity(
+                transcript: transcript, trackId: "no_target",
+                faceImageBase64: "", contextImageBase64: ""
+            )
+            return
+        }
+        // Do NOT lock `targetTrackId` here: an auto-picked (center-face) target
+        // must stay live so the next "find info on him" re-centers. Only an
+        // explicit tap (selectTarget) should lock a track.
+        statusLine = "Identifying…"
+
+        var faceBase64 = ""
+        var contextBase64 = ""
+        if appModel.demoMode != .mockAll, let pb = latestPixelBuffer {
+            appModel.setIdentityPhase("Reading the badge…")
+            faceBase64 = (try? cropper.base64JPEG(from: pb, normalizedBox: target.rect)) ?? ""
+            contextBase64 = (try? imageCropper.base64JPEG(
+                from: pb,
+                normalizedRect: contextRect(for: target),
+                jpegQuality: 0.7
+            )) ?? ""
+        }
+
+        await appModel.resolveIdentity(
+            transcript: transcript,
+            trackId: target.trackId,
+            faceImageBase64: faceBase64,
+            contextImageBase64: contextBase64
+        )
+        statusLine = nil
     }
 
     // MARK: - Overlay helpers (read by the view)

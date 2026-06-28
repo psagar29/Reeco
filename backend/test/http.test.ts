@@ -9,6 +9,7 @@ import {
   parseInterpretRequest,
   parseOpenerRequest,
   parseMatchFaceRequest,
+  parseIdentityResolveRequest,
   sanitizeMatchResult,
 } from "../convex/lib/http.js";
 import type { FaceMatchResult } from "../convex/lib/types.js";
@@ -146,6 +147,45 @@ describe("parseMatchFaceRequest", () => {
   it("rejects an unsupported mime type with 400", () => {
     expect(() =>
       parseMatchFaceRequest({ imageBase64: "abc", imageMimeType: "image/gif" }),
+    ).toThrow(HttpError);
+  });
+});
+
+describe("parseIdentityResolveRequest", () => {
+  it("accepts a full payload", () => {
+    expect(
+      parseIdentityResolveRequest({
+        trackId: "trk_1",
+        transcript: "find info on him",
+        faceImageBase64: "AAAA",
+        contextImageBase64: "BBBB",
+        imageMimeType: "image/png",
+      }),
+    ).toEqual({
+      trackId: "trk_1",
+      transcript: "find info on him",
+      faceImageBase64: "AAAA",
+      contextImageBase64: "BBBB",
+      imageMimeType: "image/png",
+    });
+  });
+
+  it("defaults images to '' and mime to image/jpeg; omits transcript when absent", () => {
+    const out = parseIdentityResolveRequest({ trackId: "trk_1" });
+    expect(out.faceImageBase64).toBe("");
+    expect(out.contextImageBase64).toBe("");
+    expect(out.imageMimeType).toBe("image/jpeg");
+    expect("transcript" in out).toBe(false);
+  });
+
+  it("rejects a missing/empty trackId with 400", () => {
+    expect(() => parseIdentityResolveRequest({})).toThrow(HttpError);
+    expect(() => parseIdentityResolveRequest({ trackId: "" })).toThrow(HttpError);
+  });
+
+  it("rejects an unsupported mime type with 400", () => {
+    expect(() =>
+      parseIdentityResolveRequest({ trackId: "t", imageMimeType: "image/gif" }),
     ).toThrow(HttpError);
   });
 });

@@ -85,6 +85,11 @@ Environment Variables).
 | `DEEPGRAM_API_KEY` | `...` | Real streaming token. Empty → stub token (use typed/chips). |
 | `FACE_STRONG_MATCH_SCORE` | `0.38` | Cosine threshold → `matched`. |
 | `FACE_TENTATIVE_MATCH_SCORE` | `0.30` | Cosine threshold → `tentative`. |
+| `FIBER_API_KEY` | `...` | Identity lane person lookup. Empty → identity returns `not_found`. |
+| `FIBER_API_BASE_URL` | `https://api.fiber.ai` | Fiber base URL (no trailing slash). |
+| `OPENAI_VISION_MODEL` | `gpt-4o` | Vision model that reads the badge. Empty → identity returns `needs_clarification`. |
+| `IDENTITY_MIN_OCR_CONFIDENCE` | `0.45` | OCR confidence floor → `needs_clarification`. |
+| `IDENTITY_FACE_VERIFY_THRESHOLD` | `0.32` | Cosine floor to mark a candidate face-`verified` (real CV only). |
 
 ### iOS (Xcode scheme env vars)
 
@@ -216,7 +221,19 @@ in the scheme (see §4) — **only once live wiring has merged** (see status not
    Non-matching overlays dim; the Brain graph reflects the same state.
 7. **Draft an opener.** With a person selected, tap "Draft opener" (or say "draft
    an opener for Ava"). Read the one-line opener aloud.
-8. **Brain view (optional close).** Switch to the Brain graph: *"This also works
+8. **"Find info on him" (identity lane).** Point at a person wearing a badge and
+   say or type **"find info on him"** (mic menu has a quick-pick). The ribbon
+   shows the phases — *Locking target → Reading the badge → searching ·
+   verifying* — then the **identity result sheet** appears:
+   - **`live` (device + CV + keys):** OpenAI Vision reads the name tag → Fiber
+     finds the LinkedIn/profile → the candidate's profile photo is face-verified
+     against the live face. Shows **Verified** (green) when the face confirms,
+     **Possible** otherwise, with name / role / company / LinkedIn / email.
+   - **`mockAll` (no backend):** returns a deterministic **Possible** demo match
+     (mock mode can't face-verify, so it never claims "Verified").
+   *"It read his badge, found his LinkedIn, and confirmed it's really him by his
+   face — all server-side; the phone holds no API keys."*
+9. **Brain view (optional close).** Switch to the Brain graph: *"This also works
    across the whole roster, not just who's in my camera."*
 
 You can verify the command/draft behavior **without the phone** using the backend
@@ -240,6 +257,8 @@ npx convex run drafts:createOpener '{"personId":"person_ava_shah"}'
 | **No face detected** | Backend returns `no_face` → app shows no card (correct). Re-scan closer; or demo via the **Brain graph** + voice instead of the camera. |
 | **Wrong-match worry** | Thresholds are conservative (`matched ≥ 0.38`); below that → `unknown` with **no name shown**. If a wrong name ever appears, raise `FACE_STRONG_MATCH_SCORE` (e.g. `0.45`) and re-`seed:run`. |
 | **Voice/Deepgram fails** | Use the **typed command bar** or the **chips** (AI / Founder / Infra / Growth / Design / Reset) — same command path, same result. |
+| **Identity returns `needs_clarification`** | Badge not legible — move closer so the chest/name-tag is in frame, or check `OPENAI_API_KEY` / `OPENAI_VISION_MODEL`. |
+| **Identity never shows "Verified"** | CV unavailable, no profile photo, or lighting/angle below `IDENTITY_FACE_VERIFY_THRESHOLD` — by design it degrades to **Possible** rather than fake a match. Fall back to **`mockAll`** to show the flow. |
 | **PowerShell quoting errors on `convex run`** | Re-run the command in **Git Bash**. |
 
 > **Stage parachute:** if all live services fail, `mockAll` + chips + the Brain

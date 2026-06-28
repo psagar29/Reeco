@@ -153,6 +153,57 @@ export function parseOpenerRequest(body: unknown): {
 const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
 
 /**
+ * Validate the body of `POST /api/identity/resolve` ("find info on him").
+ * `trackId` is required. Both crops are optional (the action degrades to
+ * `needs_clarification` when the context/badge image is missing) so a minimal
+ * payload still works. `imageMimeType` defaults to "image/jpeg".
+ */
+export function parseIdentityResolveRequest(body: unknown): {
+  trackId: string;
+  transcript?: string | null;
+  faceImageBase64: string;
+  contextImageBase64: string;
+  imageMimeType: "image/jpeg" | "image/png";
+} {
+  const root = asObject(body);
+  if (typeof root.trackId !== "string" || root.trackId.length === 0) {
+    throw new HttpError(400, "`trackId` must be a non-empty string");
+  }
+
+  const faceImageBase64 =
+    typeof root.faceImageBase64 === "string" ? root.faceImageBase64 : "";
+  const contextImageBase64 =
+    typeof root.contextImageBase64 === "string" ? root.contextImageBase64 : "";
+
+  let imageMimeType: "image/jpeg" | "image/png" = "image/jpeg";
+  if (root.imageMimeType !== undefined) {
+    if (
+      typeof root.imageMimeType !== "string" ||
+      !IMAGE_MIME_TYPES.has(root.imageMimeType)
+    ) {
+      throw new HttpError(
+        400,
+        '`imageMimeType` must be "image/jpeg" or "image/png"',
+      );
+    }
+    imageMimeType = root.imageMimeType as "image/jpeg" | "image/png";
+  }
+
+  const out: {
+    trackId: string;
+    transcript?: string | null;
+    faceImageBase64: string;
+    contextImageBase64: string;
+    imageMimeType: "image/jpeg" | "image/png";
+  } = { trackId: root.trackId, faceImageBase64, contextImageBase64, imageMimeType };
+
+  if (root.transcript === null || typeof root.transcript === "string") {
+    out.transcript = root.transcript as string | null;
+  }
+  return out;
+}
+
+/**
  * Validate the body of `POST /api/vision/match-face`. `imageBase64` is required;
  * `imageMimeType` defaults to "image/jpeg" and `trackId` is generated when
  * absent so a minimal iOS payload still works.

@@ -103,3 +103,94 @@ export type EmbedResponse = {
   latencyMs?: number | null;
   error?: string | null;
 };
+
+// ---------------------------------------------------------------------------
+// Identity resolution ("find info on him").
+//
+// The camera locks the center/largest face, captures a tight face crop (for
+// face verification) plus a wider person/badge crop (for OCR). The backend
+// reads the name tag with OpenAI Vision, finds candidate profiles with Fiber
+// AI, and verifies a candidate's profile photo against the live face with the
+// existing InsightFace CV service. iOS holds NONE of these keys.
+// ---------------------------------------------------------------------------
+
+/** A clue read off the badge/name-tag/context crop by OpenAI Vision. */
+export type IdentityClue = {
+  /** Raw OCR text the model saw (sanitized). */
+  rawText: string;
+  fullName?: string | null;
+  company?: string | null;
+  role?: string | null;
+  school?: string | null;
+  /** 0..1 model confidence that `fullName` is a real, readable name. */
+  confidence: number;
+  /** Short human-readable note on what the reading was based on. */
+  evidence?: string | null;
+};
+
+/** A candidate identity returned by the Fiber AI person lookup. */
+export type IdentityCandidate = {
+  /** Stable id we mint for this candidate within one resolve call. */
+  candidateId: string;
+  fullName: string;
+  headline?: string | null;
+  role?: string | null;
+  company?: string | null;
+  school?: string | null;
+  location?: string | null;
+  linkedinUrl?: string | null;
+  email?: string | null;
+  profilePhotoUrl?: string | null;
+  /** Where this candidate came from, e.g. "fiber:kitchen-sink". */
+  source: string;
+  /**
+   * Ranking score filled in by identityScoring.combineScores. Non-verified
+   * candidates fall in [0, 1]; face-verified candidates are lifted to [1, 2] so
+   * they always outrank non-verified ones. Used only for ranking/debug — the
+   * user-facing signal is the result `status`, never this number.
+   */
+  matchScore: number;
+};
+
+/** Face verification of a candidate's profile photo against the live face. */
+export type FaceVerification = {
+  candidateId: string;
+  /** True only when a face was found in both photos AND score >= threshold. */
+  verified: boolean;
+  /** Cosine similarity 0..1, or null when verification could not run. */
+  score?: number | null;
+  threshold: number;
+  faceDetected: boolean;
+  message?: string | null;
+};
+
+/** Status of an identity resolution attempt. */
+export type IdentityResolveStatus =
+  | "verified"
+  | "possible"
+  | "not_found"
+  | "needs_clarification"
+  | "error";
+
+/** Request to resolve the identity of the locked target (HTTP body). */
+export type IdentityResolveRequest = {
+  trackId: string;
+  transcript?: string | null;
+  /** Tight face crop, base64 (no data: prefix). May be empty in mock mode. */
+  faceImageBase64: string;
+  /** Wider person/badge crop, base64 (no data: prefix). */
+  contextImageBase64: string;
+  imageMimeType: "image/jpeg" | "image/png";
+};
+
+/** Final result of an identity resolution attempt. */
+export type IdentityResolveResult = {
+  trackId: string;
+  status: IdentityResolveStatus;
+  clue?: IdentityClue | null;
+  candidates: IdentityCandidate[];
+  bestCandidate?: IdentityCandidate | null;
+  verification?: FaceVerification | null;
+  message?: string | null;
+  latencyMs?: number | null;
+};

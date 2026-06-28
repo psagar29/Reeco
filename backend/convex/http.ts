@@ -14,6 +14,8 @@
  *   POST /api/voice/interpret  -> FilterCommand             ({ transcript, visiblePersonIds? })
  *   POST /api/drafts/opener    -> DraftResult               ({ personId, userGoal? })
  *   POST /api/vision/match-face-> FaceMatchResult           ({ imageBase64, imageMimeType?, trackId? })
+ *   POST /api/identity/resolve -> IdentityResolveResult     ({ trackId, transcript?, faceImageBase64?, contextImageBase64?, imageMimeType? })
+ *   POST /api/voice/deepgram-token -> { temporaryToken, expiresAt }
  *
  * All responses (success and error) are JSON with permissive CORS headers, and
  * every route answers `OPTIONS` preflight. Errors use `{ ok:false, error }`.
@@ -28,6 +30,7 @@ import {
   jsonResponse,
   optionsResponse,
   parseFilterRequest,
+  parseIdentityResolveRequest,
   parseInterpretRequest,
   parseMatchFaceRequest,
   parseOpenerRequest,
@@ -140,6 +143,23 @@ route(
     // Re-assert the safety invariant at the boundary: no name for low confidence.
     return sanitizeMatchResult(result);
   }),
+);
+
+// --- POST /api/identity/resolve  ("find info on him") -----------------------
+route(
+  "/api/identity/resolve",
+  "POST",
+  jsonAction(async (ctx, request) => {
+    const args = parseIdentityResolveRequest(await readJsonBody(request));
+    return ctx.runAction(api.identity.resolveTarget, args);
+  }),
+);
+
+// --- POST /api/voice/deepgram-token  -> short-lived streaming token ---------
+route(
+  "/api/voice/deepgram-token",
+  "POST",
+  jsonAction(async (ctx) => ctx.runAction(api.voice.getDeepgramToken, {})),
 );
 
 export default http;

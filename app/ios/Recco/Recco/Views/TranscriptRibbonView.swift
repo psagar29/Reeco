@@ -33,7 +33,7 @@ struct TranscriptRibbonView: View {
     }
 
     @ViewBuilder private var icon: some View {
-        if appModel.isThinking {
+        if appModel.isThinking || appModel.isResolvingIdentity {
             ProgressView()
                 .controlSize(.small)
                 .tint(Theme.accent)
@@ -47,12 +47,18 @@ struct TranscriptRibbonView: View {
     }
 
     private var primaryLine: String {
+        // Identity lane phases: Listening -> Reading badge -> Searching ->
+        // Verifying -> Result (the camera/AppModel set identityStatusMessage).
+        if appModel.isResolvingIdentity {
+            return appModel.identityStatusMessage ?? "Identifying…"
+        }
         if appModel.isThinking { return "Thinking…" }
         if let t = appModel.lastTranscript, !t.isEmpty { return "“\(t)”" }
         return "Say or type a command"
     }
 
     private var secondaryLine: String {
+        if appModel.isResolvingIdentity { return "Finding info on the person in frame…" }
         if let msg = appModel.statusMessage { return msg }
         return appModel.activeFilter.summary
     }

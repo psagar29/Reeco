@@ -455,6 +455,8 @@ client URL.
 | `POST /api/voice/interpret` | `voice:interpretCommand` | `{ transcript, visiblePersonIds? }` | `FilterCommand` |
 | `POST /api/drafts/opener` | `drafts:createOpener` | `{ personId, userGoal? }` | `DraftResult` |
 | `POST /api/vision/match-face` | `vision:matchFace` | `{ imageBase64, imageMimeType?, trackId? }` | `FaceMatchResult` |
+| `POST /api/identity/resolve` | `identity:resolveTarget` | `{ trackId, transcript?, faceImageBase64?, contextImageBase64?, imageMimeType? }` | `IdentityResolveResult` |
+| `POST /api/voice/deepgram-token` | `voice:getDeepgramToken` | — | `{ temporaryToken, expiresAt }` |
 
 Transport rules:
 
@@ -467,6 +469,62 @@ Transport rules:
   `personId: null`. Show an overlay name **only** for `status === "matched"`.
 - `vision/match-face` request convenience: `imageMimeType` defaults to
   `image/jpeg`; `trackId` is generated when omitted.
+- `identity/resolve` ("find info on him"): `trackId` is required; both crops are
+  optional (a missing badge crop degrades to `needs_clarification`). The result
+  `status` is only ever `"verified"` when the text match is strong AND the
+  candidate's profile photo face-verified against the live face **using real CV
+  embeddings** (never with mock embeddings / CV unavailable). iOS must not
+  relabel a non-`verified` result. All external keys (OpenAI / Fiber / Deepgram)
+  stay server-side.
+
+### IdentityResolveResult (response of `POST /api/identity/resolve`)
+
+```ts
+type IdentityClue = {
+  rawText: string;
+  fullName?: string | null;     // OpenAI Vision returns this as `personName`
+  company?: string | null;      // ...`companyName`
+  role?: string | null;
+  school?: string | null;       // ...`schoolName`
+  confidence: number;           // 0..1
+  evidence?: string | null;
+};
+
+type IdentityCandidate = {
+  candidateId: string;
+  fullName: string;
+  headline?: string | null;
+  role?: string | null;
+  company?: string | null;
+  school?: string | null;
+  location?: string | null;
+  linkedinUrl?: string | null;
+  email?: string | null;
+  profilePhotoUrl?: string | null;
+  source: string;               // e.g. "fiber:kitchen-sink"
+  matchScore: number;           // ranking score; verified candidates rank highest
+};
+
+type FaceVerification = {
+  candidateId: string;
+  verified: boolean;            // true only with REAL CV on both sides AND score >= threshold
+  score?: number | null;        // cosine 0..1
+  threshold: number;
+  faceDetected: boolean;
+  message?: string | null;
+};
+
+type IdentityResolveResult = {
+  trackId: string;
+  status: "verified" | "possible" | "not_found" | "needs_clarification" | "error";
+  clue?: IdentityClue | null;
+  candidates: IdentityCandidate[];
+  bestCandidate?: IdentityCandidate | null;
+  verification?: FaceVerification | null;
+  message?: string | null;
+  latencyMs?: number | null;
+};
+```
 
 ## iOS internal interfaces
 
@@ -526,15 +584,23 @@ Backend:
 ```txt
 CV_SERVICE_URL=http://127.0.0.1:8000
 OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
 DEEPGRAM_API_KEY=...
 FACE_STRONG_MATCH_SCORE=0.38
 FACE_TENTATIVE_MATCH_SCORE=0.30
+# Identity lane ("find info on him"):
+FIBER_API_KEY=...
+FIBER_API_BASE_URL=https://api.fiber.ai
+OPENAI_VISION_MODEL=gpt-4o
+IDENTITY_MIN_OCR_CONFIDENCE=0.45
+IDENTITY_FACE_VERIFY_THRESHOLD=0.32
 ```
 
 iOS:
 
 ```txt
-CONVEX_URL=...
+RECCO_API_BASE_URL=https://<deployment>.convex.site
+CONVEX_URL=https://<deployment>.convex.site
 DEMO_MODE=mockAll|mockCV|live
 ```
 
@@ -550,4 +616,7 @@ Before demo lock, these must pass:
 6. Tapping a matched overlay opens profile.
 7. Draft opener returns a useful sentence.
 8. Demo can run without network using mock mode.
+9. Typed/voice "find info on him" returns an identity result; in `mockAll` it is
+   a plausible `possible` mock; "Verified" appears only when CV face-verifies a
+   candidate against the live face (never with mock embeddings).
 

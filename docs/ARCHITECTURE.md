@@ -45,8 +45,17 @@ Functions (see contracts):
 | `voice:interpretCommand` | action | NL → `FilterCommand` (OpenAI + offline fallback) |
 | `drafts:createOpener` | action | opener/email (OpenAI + templated fallback) |
 | `voice:getDeepgramToken` | action | short-lived Deepgram token |
+| `identity:resolveTarget` | action | "find info on him": OpenAI Vision badge OCR → Fiber AI lookup → CV-service face verification → scored result |
 
-Every action degrades gracefully: no API key → deterministic offline path.
+Plus an HTTP bridge (`convex/http.ts`, served on `.convex.site`):
+`POST /api/identity/resolve` → `identity:resolveTarget`,
+`POST /api/voice/deepgram-token` → `voice:getDeepgramToken`, `GET /api/health`.
+
+Every action degrades gracefully: no API key → deterministic offline path. The
+identity lane only ever reports `verified` when a candidate's profile photo
+face-verifies against the live face; otherwise `possible` / `not_found` /
+`needs_clarification`. All external keys (OpenAI, Fiber, Deepgram) stay
+server-side — iOS holds none of them.
 
 ### 3. CV service — `cv-service/` (FastAPI + InsightFace)
 
